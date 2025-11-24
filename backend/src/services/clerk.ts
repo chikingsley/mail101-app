@@ -1,3 +1,5 @@
+import { verifyToken } from "@clerk/backend";
+
 /**
  * Get Microsoft access token from Clerk
  */
@@ -32,30 +34,22 @@ export async function getMicrosoftToken(clerkUserId: string): Promise<string> {
 }
 
 /**
- * Verify Clerk session token
+ * Verify Clerk JWT token
  */
-export async function verifyClerkToken(sessionToken: string) {
+export async function verifyClerkToken(token: string) {
   const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY;
 
   if (!CLERK_SECRET_KEY) {
     throw new Error("CLERK_SECRET_KEY not configured");
   }
 
-  const response = await fetch(
-    `https://api.clerk.com/v1/sessions/${sessionToken}/verify`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${CLERK_SECRET_KEY}`,
-        "Content-Type": "application/json",
-      },
-    }
-  );
+  try {
+    const payload = await verifyToken(token, {
+      secretKey: CLERK_SECRET_KEY,
+    });
 
-  if (!response.ok) {
+    return payload.sub; // sub contains the user ID
+  } catch (error) {
     throw new Error("Invalid session token");
   }
-
-  const session = await response.json();
-  return session.user_id;
 }

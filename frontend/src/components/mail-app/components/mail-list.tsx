@@ -15,6 +15,11 @@ export function MailList({ items }: MailListProps) {
 
 	return (
 		<ScrollArea className="h-full">
+			{items.length === 0 ? (
+				<div className="flex h-full min-h-[200px] items-center justify-center p-8">
+					<p className="text-muted-foreground text-sm">No emails in this folder</p>
+				</div>
+			) : (
 			<div className="flex flex-col gap-2 p-4 pt-0">
 				{items.map((item) => (
 					<button
@@ -64,6 +69,7 @@ export function MailList({ items }: MailListProps) {
 					</button>
 				))}
 			</div>
+			)}
 		</ScrollArea>
 	);
 }

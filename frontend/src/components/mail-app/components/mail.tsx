@@ -18,6 +18,17 @@ import { MailDisplayMobile } from "./mail-display-mobile";
 import { MailList } from "./mail-list";
 import { NavDesktop } from "./nav-desktop";
 import { NavMobile } from "./nav-mobile";
+import type { MailFolder, FolderCounts } from "@/App";
+
+// Folder display names
+const FOLDER_NAMES: Record<MailFolder, string> = {
+	inbox: "Inbox",
+	sentitems: "Sent",
+	drafts: "Drafts",
+	deleteditems: "Trash",
+	junkemail: "Junk",
+	archive: "Archive",
+};
 
 interface MailProps {
 	accounts: {
@@ -29,6 +40,9 @@ interface MailProps {
 	defaultLayout: number[] | undefined;
 	defaultCollapsed?: boolean;
 	navCollapsedSize: number;
+	currentFolder: MailFolder;
+	folderCounts: FolderCounts;
+	onFolderChange: (folder: MailFolder) => void;
 }
 
 export function Mail({
@@ -36,6 +50,9 @@ export function Mail({
 	defaultLayout = [20, 32, 48],
 	defaultCollapsed = false,
 	navCollapsedSize,
+	currentFolder,
+	folderCounts,
+	onFolderChange,
 }: MailProps) {
 	const [isCollapsed, setIsCollapsed] = React.useState(defaultCollapsed);
 	const isMobile = useIsMobile();
@@ -71,7 +88,12 @@ export function Mail({
 							"min-w-[50px] transition-all duration-300 ease-in-out",
 					)}
 				>
-					<NavDesktop isCollapsed={isCollapsed} />
+					<NavDesktop
+						isCollapsed={isCollapsed}
+						currentFolder={currentFolder}
+						folderCounts={folderCounts}
+						onFolderChange={onFolderChange}
+					/>
 				</ResizablePanel>
 				<ResizableHandle hidden={isMobile} withHandle />
 				<ResizablePanel defaultSize={defaultLayout[1]} minSize={30}>
@@ -83,7 +105,7 @@ export function Mail({
 						<div className="flex items-center px-4 py-2">
 							<div className="flex items-center gap-2">
 								{isMobile && <NavMobile />}
-								<h1 className="text-xl font-bold">Inbox</h1>
+								<h1 className="text-xl font-bold">{FOLDER_NAMES[currentFolder]}</h1>
 							</div>
 							<TabsList className="ml-auto">
 								<TabsTrigger value="all">All</TabsTrigger>

@@ -6,11 +6,27 @@ import { useEffect, useState } from "react";
 
 const BACKEND_URL = process.env.BUN_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
+// Folder types matching backend
+export type MailFolder = 'inbox' | 'sentitems' | 'drafts' | 'deleteditems' | 'junkemail' | 'archive';
+
+export type FolderCounts = Record<MailFolder, { total: number; unread: number }>;
+
+const DEFAULT_FOLDER_COUNTS: FolderCounts = {
+  inbox: { total: 0, unread: 0 },
+  sentitems: { total: 0, unread: 0 },
+  drafts: { total: 0, unread: 0 },
+  deleteditems: { total: 0, unread: 0 },
+  junkemail: { total: 0, unread: 0 },
+  archive: { total: 0, unread: 0 },
+};
+
 export function App() {
   const { session } = useSession();
   const [emails, setEmails] = useState(mails); // Start with mock data
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [currentFolder, setCurrentFolder] = useState<MailFolder>('inbox');
+  const [folderCounts, setFolderCounts] = useState<FolderCounts>(DEFAULT_FOLDER_COUNTS);
 
   // Read layout preferences from localStorage
   const getLayoutPreference = () => {
@@ -23,23 +39,25 @@ export function App() {
     return collapsed ? JSON.parse(collapsed) : undefined;
   };
 
-  // Fetch emails from backend
-  const fetchEmails = async () => {
+  // Fetch emails from backend for a specific folder
+  const fetchEmails = async (folder: MailFolder = currentFolder) => {
     if (!session) return;
 
     try {
       const token = await session.getToken();
-      const response = await fetch(`${BACKEND_URL}/api/emails`, {
+      console.log(`Fetching emails for folder: ${folder}`);
+      const response = await fetch(`${BACKEND_URL}/api/emails?folder=${folder}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
 
       const data = await response.json();
+      console.log(`Received ${data.emails?.length || 0} emails for folder: ${folder}`);
 
-      if (data.success && data.emails) {
+      if (data.success) {
         // Transform backend emails to match frontend format
-        const transformedEmails = data.emails.map((email: any) => ({
+        const transformedEmails = (data.emails || []).map((email: any) => ({
           id: email.id.toString(),
           name: email.from_name || email.from_email,
           email: email.from_email,
@@ -65,6 +83,34 @@ export function App() {
     }
   };
 
+  // Fetch folder counts from backend
+  const fetchCounts = async () => {
+    if (!session) return;
+
+    try {
+      const token = await session.getToken();
+      const response = await fetch(`${BACKEND_URL}/api/emails/counts`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.counts) {
+        setFolderCounts(data.counts);
+      }
+    } catch (error) {
+      console.error('Failed to fetch counts:', error);
+    }
+  };
+
+  // Handle folder change - don't show full loading screen, just fetch
+  const handleFolderChange = async (folder: MailFolder) => {
+    setCurrentFolder(folder);
+    await fetchEmails(folder);
+  };
+
   // Sync emails from Outlook
   const syncEmails = async () => {
     if (!session || syncing) return;
@@ -82,8 +128,11 @@ export function App() {
       const data = await response.json();
       console.log('Sync result:', data);
 
-      // After syncing, fetch the emails
-      await fetchEmails();
+      // After syncing, fetch the emails and counts
+      await Promise.all([
+        fetchEmails(currentFolder),
+        fetchCounts()
+      ]);
     } catch (error) {
       console.error('Failed to sync emails:', error);
     } finally {
@@ -138,6 +187,9 @@ export function App() {
                 defaultLayout={getLayoutPreference()}
                 defaultCollapsed={getCollapsedPreference()}
                 navCollapsedSize={4}
+                currentFolder={currentFolder}
+                folderCounts={folderCounts}
+                onFolderChange={handleFolderChange}
               />
             </div>
           </div>

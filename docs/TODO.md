@@ -1,7 +1,7 @@
 # Mail101 App - TODO & Progress Tracker
 
-**Last Updated:** 2025-11-23
-**Current Status:** Phase 1 Complete - Waiting on Organization Email Permissions
+**Last Updated:** 2025-11-24
+**Current Status:** Phase 2 In Progress - Folder Support Complete, Backend Actions Complete
 
 ---
 
@@ -95,29 +95,37 @@ Building a unified workspace application combining:
 
 ---
 
-## ⏳ CURRENT BLOCKER
+## ✅ PERMISSIONS GRANTED - BLOCKER RESOLVED
 
-### Waiting on Organization Permissions
-**Status:** Pending approval from organization admin
+### Organization Permissions Received
+**Status:** ✅ COMPLETE - Permissions granted on 2025-11-24
 
-**What's Needed:**
-- Organization admin consent for Microsoft Graph API scopes
-- This will allow the app to access user emails from the organization's Microsoft 365 tenant
+**What Was Done:**
+- ✅ Organization admin consent for Microsoft Graph API scopes granted
+- ✅ App can now access user emails from the organization's Microsoft 365 tenant
+- ✅ Email sync is working and pulling real emails from Outlook
+- ✅ Successfully tested authentication and email display
 
-**Why This Matters:**
-- Without org permission, email sync cannot pull actual emails from users' Outlook accounts
-- Currently testing with mock data only
-- All backend endpoints are ready and waiting for real email data
+**Current State:**
+- Backend and frontend running via Docker Compose
+- Clerk authentication + Microsoft OAuth working
+- Email sync from Outlook Inbox functional
+- Emails displaying in UI
 
-**Action Item:**
-- 🔴 **Request admin consent for Microsoft Graph API access in Azure Portal**
+**Known Issues to Address:**
+- Email count in navigation is hardcoded (shows "128" - needs to be dynamic)
+- Only syncing Inbox folder (not Sent, Drafts, Trash, Junk, Archive)
+- Need to add folder field to database schema
+- Need to implement folder actions (archive, delete, move to junk, etc.)
 
 ---
 
-## 📝 PHASE 2: EMAIL CLIENT CORE (NEXT)
+## 📝 PHASE 2: EMAIL CLIENT CORE (IN PROGRESS)
 
 ### Email Display & Interaction
-- [ ] Connect email list UI to real backend data (remove mock data)
+- [x] Connect email list UI to real backend data (remove mock data)
+- [x] Fix hardcoded email counts in navigation (currently shows "128")
+- [x] Make email counts dynamic based on actual folder contents
 - [ ] Implement full email body display with HTML rendering
 - [ ] Add email compose modal/page
 - [ ] Implement reply and reply-all functionality
@@ -137,14 +145,40 @@ Building a unified workspace application combining:
 - [ ] Add virus scanning for uploaded attachments
 - [ ] Support inline images in email bodies
 
+### Folder Management (CRITICAL - NEXT PRIORITY)
+- [x] Add `folder` field to database schema (inbox/sent/drafts/deleted/junk/archive)
+- [x] Update email sync to fetch from multiple folders:
+  - [x] Inbox (currently working)
+  - [x] Sent Items
+  - [x] Drafts
+  - [x] Deleted Items / Trash
+  - [x] Junk Email
+  - [x] Archive
+- [x] Update frontend navigation to show per-folder counts
+- [x] Add folder filter to email list view
+- [x] Implement folder switching in UI
+
+### Email Actions (CRITICAL - NEXT PRIORITY)
+- [x] Backend: Mark email as read endpoint
+- [ ] Frontend: Connect mark as read/unread UI
+- [x] Backend: Add archive email action (POST /api/emails/:id/move)
+- [x] Backend: Add delete email action (DELETE /api/emails/:id)
+- [x] Backend: Add move to junk action (POST /api/emails/:id/move)
+- [x] Backend: Add move between folders action (POST /api/emails/:id/move)
+- [x] Backend: Add permanent delete action (DELETE /api/emails/:id)
+- [x] Backend: Update database when actions are performed
+- [x] Backend: Sync actions back to Microsoft Graph API
+- [ ] Frontend: Connect archive/delete/move UI buttons
+
 ### Email Sync Improvements
+- [x] Implement delta sync for incremental updates
+- [x] Store sync state with delta links
 - [ ] Add background job queue for email sync (BullMQ or similar)
 - [ ] Implement automatic sync every 5 minutes
 - [ ] Add manual refresh button in UI
 - [ ] Show sync status and progress indicators
 - [ ] Handle sync errors gracefully with retry logic
 - [ ] Implement webhook support for real-time sync
-- [ ] Add sync for multiple folders (Sent, Drafts, Archive)
 - [ ] Implement email deletion sync (bidirectional)
 
 ### Performance & Caching
@@ -473,11 +507,15 @@ Building a unified workspace application combining:
 
 ## 🎯 IMMEDIATE NEXT STEPS (This Week)
 
-1. **🔴 BLOCKER:** Request organization admin consent for Microsoft Graph API
-2. Once approved, test email sync with real Outlook data
-3. Remove mock data from frontend and connect to backend API
-4. Test full email workflow (sync, display, read, send)
-5. Begin planning PostgreSQL migration
+1. ✅ ~~Request organization admin consent for Microsoft Graph API~~ - COMPLETE
+2. ✅ ~~Test email sync with real Outlook data~~ - COMPLETE
+3. ✅ ~~Remove mock data from frontend and connect to backend API~~ - COMPLETE
+4. ✅ ~~Add folder support to database and sync~~ - COMPLETE
+5. ✅ ~~Fix hardcoded email counts in navigation~~ - COMPLETE
+6. ✅ ~~Backend: Implement email actions (archive, delete, junk, move)~~ - COMPLETE
+7. **🔴 IN PROGRESS:** Frontend: Connect email action buttons to backend
+8. **Next:** Add full email body display with HTML rendering
+9. **Next:** Begin planning PostgreSQL migration
 
 ---
 
@@ -495,7 +533,7 @@ Building a unified workspace application combining:
 | Phase | Status | Completion |
 |-------|--------|------------|
 | **Phase 1: Foundation** | ✅ Complete | 100% |
-| **Phase 2: Email Client Core** | ⏳ Blocked | 0% (waiting on org permissions) |
+| **Phase 2: Email Client Core** | 🚧 In Progress | ~35% (folders working, backend actions done, frontend actions pending) |
 | **Phase 3: Database Migration** | 📋 Planned | 0% |
 | **Phase 4: Project Management** | 📋 Planned | 0% |
 | **Phase 5: File Management** | 📋 Planned | 0% |
@@ -506,9 +544,9 @@ Building a unified workspace application combining:
 | **Phase 10: Production** | 📋 Planned | 0% |
 | **Phase 11: Polish** | 📋 Planned | 0% |
 
-**Overall Project Progress:** ~9% (1 of 11 phases complete)
+**Overall Project Progress:** ~14% (Phase 1 complete, Phase 2 ~35%)
 
 ---
 
-**Last Updated:** 2025-11-23
-**Next Review:** After receiving organization email permissions
+**Last Updated:** 2025-11-24
+**Next Review:** After connecting frontend action buttons

@@ -1,25 +1,36 @@
 import {
-	AlertCircle,
 	Archive,
 	ArchiveX,
 	File,
 	Inbox,
-	MessagesSquare,
 	Send,
-	ShoppingCart,
 	Trash2,
-	Users2,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { AccountSwitcher } from "./account-switcher";
 import { Nav } from "./nav";
+import type { MailFolder, FolderCounts } from "@/App";
 
 interface NavDesktopProps {
 	isCollapsed: boolean;
+	currentFolder: MailFolder;
+	folderCounts: FolderCounts;
+	onFolderChange: (folder: MailFolder) => void;
 }
 
-export function NavDesktop({ isCollapsed }: NavDesktopProps) {
+export function NavDesktop({
+	isCollapsed,
+	currentFolder,
+	folderCounts,
+	onFolderChange,
+}: NavDesktopProps) {
+	// Helper to format count - show unread count or empty string if 0
+	const formatCount = (folder: MailFolder): string => {
+		const count = folderCounts[folder]?.unread || 0;
+		return count > 0 ? count.toString() : "";
+	};
+
 	return (
 		<>
 			<div
@@ -38,92 +49,45 @@ export function NavDesktop({ isCollapsed }: NavDesktopProps) {
 				links={[
 					{
 						title: "Inbox",
-						label: "128",
+						label: formatCount("inbox"),
 						icon: Inbox,
-						variant: "default",
+						variant: currentFolder === "inbox" ? "default" : "ghost",
+						onClick: () => onFolderChange("inbox"),
 					},
 					{
 						title: "Drafts",
-						label: "9",
+						label: formatCount("drafts"),
 						icon: File,
-						variant: "ghost",
+						variant: currentFolder === "drafts" ? "default" : "ghost",
+						onClick: () => onFolderChange("drafts"),
 					},
 					{
 						title: "Sent",
-						label: "",
+						label: formatCount("sentitems"),
 						icon: Send,
-						variant: "ghost",
+						variant: currentFolder === "sentitems" ? "default" : "ghost",
+						onClick: () => onFolderChange("sentitems"),
 					},
 					{
 						title: "Junk",
-						label: "23",
+						label: formatCount("junkemail"),
 						icon: ArchiveX,
-						variant: "ghost",
+						variant: currentFolder === "junkemail" ? "default" : "ghost",
+						onClick: () => onFolderChange("junkemail"),
 					},
 					{
 						title: "Trash",
-						label: "",
+						label: formatCount("deleteditems"),
 						icon: Trash2,
-						variant: "ghost",
+						variant: currentFolder === "deleteditems" ? "default" : "ghost",
+						onClick: () => onFolderChange("deleteditems"),
 					},
 					{
 						title: "Archive",
-						label: "",
+						label: formatCount("archive"),
 						icon: Archive,
-						variant: "ghost",
-					},
-				]}
-			/>
-
-			<Separator />
-
-			<Nav
-				isCollapsed={isCollapsed}
-				links={[
-					{
-						title: "Social",
-						label: "972",
-						icon: Users2,
-						dot: (
-							<span className="me-2 size-3.5 rounded-full bg-indigo-400 dark:bg-indigo-700" />
-						),
-						variant: "ghost",
-					},
-					{
-						title: "Updates",
-						label: "342",
-						icon: AlertCircle,
-						dot: (
-							<span className="me-2 size-3.5 rounded-full bg-teal-400 dark:bg-teal-700" />
-						),
-						variant: "ghost",
-					},
-					{
-						title: "Forums",
-						label: "128",
-						icon: MessagesSquare,
-						dot: (
-							<span className="me-2 size-3.5 rounded-full bg-orange-400 dark:bg-orange-700" />
-						),
-						variant: "ghost",
-					},
-					{
-						title: "Shopping",
-						label: "8",
-						icon: ShoppingCart,
-						dot: (
-							<span className="me-2 size-3.5 rounded-full bg-lime-400 dark:bg-lime-700" />
-						),
-						variant: "ghost",
-					},
-					{
-						title: "Promotions",
-						label: "21",
-						icon: Archive,
-						dot: (
-							<span className="me-2 size-3.5 rounded-full bg-pink-400 dark:bg-pink-700" />
-						),
-						variant: "ghost",
+						variant: currentFolder === "archive" ? "default" : "ghost",
+						onClick: () => onFolderChange("archive"),
 					},
 				]}
 			/>

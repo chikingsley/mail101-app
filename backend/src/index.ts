@@ -31,7 +31,7 @@ const app = new Elysia()
     }
   })
   .use(emailRoutes)
-  .listen(process.env.BACKEND_URL ? parseInt(process.env.BACKEND_URL.split(":").pop() || "3001") : 3001);
+  .listen(process.env.PORT ? parseInt(process.env.PORT) : 3000);
 
 console.log(
   `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`

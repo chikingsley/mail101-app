@@ -95,16 +95,28 @@ export async function sendEmail(
 }
 
 /**
- * Get delta sync (incremental updates)
+ * Supported mail folder names in Microsoft Graph API
+ */
+export type GraphMailFolder =
+  | "inbox"
+  | "sentitems"
+  | "drafts"
+  | "deleteditems"
+  | "junkemail"
+  | "archive";
+
+/**
+ * Get delta sync (incremental updates) for a specific folder
  */
 export async function getDeltaEmails(
   accessToken: string,
+  folder: GraphMailFolder = "inbox",
   deltaLink?: string
 ) {
   const client = createGraphClient(accessToken);
 
   let request = client.api(
-    deltaLink || "/me/mailFolders/inbox/messages/delta"
+    deltaLink || `/me/mailFolders/${folder}/messages/delta`
   );
 
   if (!deltaLink) {
@@ -134,4 +146,29 @@ export async function getDeltaEmails(
     nextLink: response["@odata.nextLink"],
     deltaLink: response["@odata.deltaLink"],
   };
+}
+
+/**
+ * Move email to a different folder
+ */
+export async function moveEmail(
+  accessToken: string,
+  emailId: string,
+  destinationFolder: GraphMailFolder
+) {
+  const client = createGraphClient(accessToken);
+
+  const response = await client.api(`/me/messages/${emailId}/move`).post({
+    destinationId: destinationFolder,
+  });
+
+  return response;
+}
+
+/**
+ * Delete email permanently
+ */
+export async function deleteEmail(accessToken: string, emailId: string) {
+  const client = createGraphClient(accessToken);
+  await client.api(`/me/messages/${emailId}`).delete();
 }

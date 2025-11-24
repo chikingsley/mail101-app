@@ -16,6 +16,7 @@ interface NavProps {
 		icon: LucideIcon;
 		dot?: ReactNode;
 		variant: "default" | "ghost";
+		onClick?: () => void;
 	}[];
 }
 
@@ -32,6 +33,7 @@ export function Nav({ links, isCollapsed }: NavProps) {
 							<TooltipTrigger asChild>
 								<button
 									type="button"
+									onClick={link.onClick}
 									className={cn(
 										buttonVariants({ variant: link.variant, size: "icon" }),
 										"h-9 w-9",
@@ -56,6 +58,7 @@ export function Nav({ links, isCollapsed }: NavProps) {
 						<button
 							type="button"
 							key={index}
+							onClick={link.onClick}
 							className={cn(
 								buttonVariants({ variant: link.variant, size: "sm" }),
 								link.variant === "default" &&
