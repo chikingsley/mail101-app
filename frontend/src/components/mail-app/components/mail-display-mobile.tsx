@@ -10,8 +10,8 @@ import {
 	ReplyAll,
 	Trash2,
 } from "lucide-react";
-import React, { useEffect } from "react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import React, { useEffect, useRef } from "react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -36,17 +36,21 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { Mail } from "../data";
 import { useMailStore } from "../use-mail";
+import type { EmailWithFlags } from "@/App";
+import type { EmailActions } from "./mail";
+import { EmailBody } from "./email-body";
 
 interface MailDisplayProps {
-	mail: Mail | null;
+	mail: EmailWithFlags | null;
+	emailActions: EmailActions;
 }
 
-export function MailDisplayMobile({ mail }: MailDisplayProps) {
+export function MailDisplayMobile({ mail, emailActions }: MailDisplayProps) {
 	const [open, setOpen] = React.useState(false);
 	const today = new Date();
 	const { selectedMail, setSelectedMail } = useMailStore();
+	const lastMarkedReadId = useRef<string | null>(null);
 
 	useEffect(() => {
 		if (selectedMail) {
@@ -59,6 +63,17 @@ export function MailDisplayMobile({ mail }: MailDisplayProps) {
 			setSelectedMail(null);
 		}
 	}, [open, setSelectedMail]);
+
+	// Auto mark as read when viewing an email
+	useEffect(() => {
+		if (mail && !mail.read && mail.id !== lastMarkedReadId.current) {
+			lastMarkedReadId.current = mail.id;
+			const timer = setTimeout(() => {
+				emailActions.markAsRead(mail.id).catch(console.error);
+			}, 500);
+			return () => clearTimeout(timer);
+		}
+	}, [mail?.id, mail?.read, emailActions]);
 
 	return (
 		<Drawer open={open} onOpenChange={setOpen}>
@@ -222,7 +237,6 @@ export function MailDisplayMobile({ mail }: MailDisplayProps) {
 							<div className="flex items-start p-4">
 								<div className="flex items-start gap-4 text-sm">
 									<Avatar>
-										<AvatarImage src={mail.avatar} alt={mail.name} />
 										<AvatarFallback>
 											{mail.name
 												.split(" ")
@@ -248,8 +262,8 @@ export function MailDisplayMobile({ mail }: MailDisplayProps) {
 
 							<Separator />
 
-							<div className="flex-1 p-4 text-sm whitespace-pre-wrap">
-								{mail.text}
+							<div className="flex-1 overflow-auto">
+								<EmailBody emailId={mail.id} fallbackText={mail.text} />
 							</div>
 
 							<Separator className="mt-auto" />

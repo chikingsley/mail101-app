@@ -1,26 +1,50 @@
 # Mail101 App - TODO
 
-**Last Updated:** 2025-11-24
+**Last Updated:** 2025-11-25
 
 ## Progress
 
 | Phase | Status | Progress |
 |-------|--------|----------|
 | Phase 1: Foundation | ✅ Done | 100% |
-| Phase 2: Email Client | 🚧 Active | ~35% |
-| Phase 3: Database Migration | ⏳ Next | 0% |
+| Phase 2: Email Client | 🚧 Active | ~70% |
+| Phase 3: Database Migration | ✅ Done | 100% |
 | Phase 4-11: Future | 📋 Planned | 0% |
 
 ---
 
-## 🔴 Current Sprint: Email Client Core
+## ✅ Recently Completed
+
+### Supabase/Postgres Migration (Phase 3)
+- [x] Migrated from SQLite to Supabase Postgres
+- [x] Using Bun.SQL with connection pooling (max: 10, idleTimeout: 20s)
+- [x] Tables: users, emails, sync_state, webhook_subscriptions
+- [x] Direct connection (DIRECT_URL) for prepared statement support
 
 ### Email Actions (Frontend)
-- [ ] Connect mark as read/unread UI buttons
-- [ ] Connect archive button to `POST /api/emails/:id/move`
-- [ ] Connect delete button to `DELETE /api/emails/:id`
-- [ ] Connect "move to junk" action
-- [ ] Add confirmation dialogs for destructive actions
+- [x] Mark as read/unread with optimistic updates
+- [x] Archive emails (move to archive folder)
+- [x] Delete emails (move to Deleted Items)
+- [x] Move to junk/spam
+- [x] Flag emails with colors (red, orange, yellow, green, blue, purple)
+- [x] Framer Motion animations for email list (slide in/out)
+- [x] React.memo optimization for email items
+
+### Real-time Updates
+- [x] Microsoft Graph webhook subscriptions
+- [x] Delta sync for incremental updates
+- [x] 30-second polling fallback
+- [x] Window focus refresh
+- [x] Removed unreliable Supabase Realtime (replaced with polling)
+
+### Multi-folder Support
+- [x] Inbox, Sent, Drafts, Deleted Items, Junk, Archive
+- [x] Folder counts (total/unread)
+- [x] Folder navigation in sidebar
+
+---
+
+## 🔴 Current Sprint: Email Client Polish
 
 ### Email Display
 - [ ] Implement full email body display with HTML rendering
@@ -34,27 +58,9 @@
 - [ ] Add sorting options
 - [ ] Add bulk actions (select multiple, mark read, delete)
 
-### Sync Improvements
-- [ ] Add manual refresh button in UI
-- [ ] Show sync status indicator
-- [ ] Handle sync errors gracefully
-
----
-
-## ⏳ Next Up: Phase 3 - Database Migration
-
-### PostgreSQL Setup
-- [ ] Set up PostgreSQL (local + hosted)
-- [ ] Install Prisma ORM
-- [ ] Migrate existing SQLite data
-- [ ] Update all queries to use Prisma
-
-### New Tables
-- [ ] users, companies, contacts
-- [ ] projects, tasks
-- [ ] email_threads, email_attachments
-- [ ] estimates, invoices
-- [ ] files, activity_log
+### Known Issues
+- [ ] Permanent delete from Deleted Items folder not working (Graph API issue)
+- [ ] Thread view not fully implemented (conversation grouping exists but not expanded)
 
 ---
 

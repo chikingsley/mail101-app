@@ -1,9 +1,9 @@
 import { create } from "zustand";
-import type { Mail } from "./data";
+import type { EmailWithFlags } from "@/App";
 
 type MailStore = {
-	selectedMail: Mail | null;
-	setSelectedMail: (mail: Mail | null) => void;
+	selectedMail: EmailWithFlags | null;
+	setSelectedMail: (mail: EmailWithFlags | null) => void;
 };
 
 export const useMailStore = create<MailStore>((set) => ({

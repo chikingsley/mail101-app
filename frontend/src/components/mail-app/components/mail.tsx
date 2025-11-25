@@ -11,14 +11,16 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
-import type { Mail as MailType } from "../data";
 import { useMailStore } from "../use-mail";
 import { MailDisplay } from "./mail-display";
 import { MailDisplayMobile } from "./mail-display-mobile";
 import { MailList } from "./mail-list";
 import { NavDesktop } from "./nav-desktop";
 import { NavMobile } from "./nav-mobile";
-import type { MailFolder, FolderCounts } from "@/App";
+import type { MailFolder, FolderCounts, EmailWithFlags } from "@/App";
+import type { useEmailActions } from "@/hooks/use-email-actions";
+
+export type EmailActions = ReturnType<typeof useEmailActions>;
 
 // Folder display names
 const FOLDER_NAMES: Record<MailFolder, string> = {
@@ -36,13 +38,14 @@ interface MailProps {
 		email: string;
 		icon: React.ReactNode;
 	}[];
-	mails: MailType[];
+	mails: EmailWithFlags[];
 	defaultLayout: number[] | undefined;
 	defaultCollapsed?: boolean;
 	navCollapsedSize: number;
 	currentFolder: MailFolder;
 	folderCounts: FolderCounts;
 	onFolderChange: (folder: MailFolder) => void;
+	emailActions: EmailActions;
 }
 
 export function Mail({
@@ -53,6 +56,7 @@ export function Mail({
 	currentFolder,
 	folderCounts,
 	onFolderChange,
+	emailActions,
 }: MailProps) {
 	const [isCollapsed, setIsCollapsed] = React.useState(defaultCollapsed);
 	const isMobile = useIsMobile();
@@ -121,12 +125,12 @@ export function Mail({
 								</div>
 							</form>
 						</div>
-						<div className="min-h-0">
+						<div className="min-h-0 flex-1">
 							<MailList
 								items={
 									tab === "all"
 										? mails
-										: mails.filter((item) => item.read === (tab === "read"))
+										: mails.filter((item) => !item.read)
 								}
 							/>
 						</div>
@@ -141,10 +145,12 @@ export function Mail({
 					{isMobile ? (
 						<MailDisplayMobile
 							mail={mails.find((item) => item.id === selectedMail?.id) || null}
+							emailActions={emailActions}
 						/>
 					) : (
 						<MailDisplay
 							mail={mails.find((item) => item.id === selectedMail?.id) || null}
+							emailActions={emailActions}
 						/>
 					)}
 				</ResizablePanel>

@@ -1,564 +1,648 @@
 import { Elysia, t } from "elysia";
-import { getMicrosoftToken, verifyClerkToken } from "../services/clerk";
 import {
-  fetchEmails,
-  fetchEmailBody,
-  markEmailAsRead,
-  sendEmail,
-  getDeltaEmails,
-  moveEmail,
-  deleteEmail,
-  type GraphMailFolder,
+	emailQueries,
+	MAIL_FOLDERS,
+	type MailFolder,
+	syncQueries,
+	userQueries,
+} from "../db/supabase";
+import {
+	getClerkUser,
+	getMicrosoftToken,
+	verifyClerkToken,
+} from "../services/clerk";
+import {
+	deleteEmail as deleteEmailGraph,
+	permanentDeleteEmail,
+	fetchEmailBody,
+	type GraphMailFolder,
+	getDeltaEmails,
+	moveEmail,
+	updateEmailFlag,
+	updateEmailReadStatus,
 } from "../services/graph";
-import { emailQueries, syncQueries, MAIL_FOLDERS, type MailFolder } from "../db";
+
+// Valid flag colors (local only - Microsoft Graph doesn't support colors)
+const FLAG_COLORS = [
+	"red",
+	"orange",
+	"yellow",
+	"green",
+	"blue",
+	"purple",
+] as const;
+type FlagColor = (typeof FLAG_COLORS)[number];
+
+// Helper to get or create user from Clerk ID
+async function getOrCreateUser(clerkUserId: string) {
+	let user = await userQueries.getByClerkId(clerkUserId);
+	if (!user) {
+		// Get user info from Clerk and create
+		const clerkUser = await getClerkUser(clerkUserId);
+		user = await userQueries.getOrCreate(
+			clerkUserId,
+			clerkUser?.emailAddresses?.[0]?.emailAddress || "unknown@example.com",
+			clerkUser?.firstName
+				? `${clerkUser.firstName} ${clerkUser.lastName || ""}`.trim()
+				: undefined,
+		);
+	}
+	return user;
+}
 
 // Helper to sync a single folder
 async function syncFolder(
-  accessToken: string,
-  clerkUserId: string,
-  folder: MailFolder
-): Promise<{ inserted: number; total: number }> {
-  // Check if we have a delta link for this user+folder
-  const syncState = syncQueries.getByUserAndFolder.get(clerkUserId, folder);
+	accessToken: string,
+	userId: string,
+	folder: MailFolder,
+): Promise<{
+	inserted: number;
+	updated: number;
+	removed: number;
+	total: number;
+}> {
+	// Check if we have a delta link for this user+folder
+	const syncState = await syncQueries.getByUserAndFolder(userId, folder);
 
-  let emails;
-  let deltaLink;
+	let emails: any[] = [];
+	let deltaLink: string | undefined;
 
-  if (syncState?.delta_link) {
-    // Use delta sync for incremental updates
-    const deltaResult = await getDeltaEmails(
-      accessToken,
-      folder as GraphMailFolder,
-      syncState.delta_link
-    );
-    emails = deltaResult.emails;
-    deltaLink = deltaResult.deltaLink;
-  } else {
-    // First sync - fetch all emails for this folder
-    const fetchResult = await getDeltaEmails(accessToken, folder as GraphMailFolder);
-    emails = fetchResult.emails;
-    deltaLink = fetchResult.deltaLink;
-  }
+	if (syncState?.delta_link) {
+		// Use delta sync for incremental updates
+		const deltaResult = await getDeltaEmails(
+			accessToken,
+			folder as GraphMailFolder,
+			syncState.delta_link,
+		);
+		emails = deltaResult.emails;
+		deltaLink = deltaResult.deltaLink;
+	} else {
+		// First sync - fetch all emails for this folder
+		const fetchResult = await getDeltaEmails(
+			accessToken,
+			folder as GraphMailFolder,
+		);
+		emails = fetchResult.emails;
+		deltaLink = fetchResult.deltaLink;
+	}
 
-  // Store emails in database
-  let inserted = 0;
-  for (const email of emails) {
-    try {
-      emailQueries.insert.run(
-        clerkUserId,
-        email.id,
-        email.conversationId || null,
-        email.internetMessageId || null,
-        folder, // Include folder
-        email.from?.emailAddress?.address || "",
-        email.from?.emailAddress?.name || null,
-        email.subject || null,
-        email.bodyPreview || null,
-        email.toRecipients
-          ? JSON.stringify(
-              email.toRecipients.map((r: any) => r.emailAddress?.address)
-            )
-          : null,
-        email.ccRecipients
-          ? JSON.stringify(
-              email.ccRecipients.map((r: any) => r.emailAddress?.address)
-            )
-          : null,
-        email.isRead ? 1 : 0,
-        email.hasAttachments ? 1 : 0,
-        email.importance || "normal",
-        email.receivedDateTime,
-        email.sentDateTime || null
-      );
-      inserted++;
-    } catch (err) {
-      // Skip duplicates (outlook_id is UNIQUE)
-      if (
-        err instanceof Error &&
-        err.message.includes("UNIQUE constraint")
-      ) {
-        continue;
-      }
-      throw err;
-    }
-  }
+	// Process emails - handle inserts, updates, and removals
+	let inserted = 0;
+	let updated = 0;
+	let removed = 0;
 
-  // Update sync state with new delta link
-  if (deltaLink) {
-    syncQueries.upsert.run(clerkUserId, folder, deltaLink);
-  }
+	for (const email of emails) {
+		// Check if this is a removal (email deleted or moved out of folder)
+		if (email["@removed"]) {
+			try {
+				await emailQueries.deleteByOutlookId(userId, email.id);
+				removed++;
+			} catch (err) {
+				console.error(`Failed to remove email ${email.id}:`, err);
+			}
+			continue;
+		}
 
-  return { inserted, total: emails.length };
+		// Try to insert new email
+		try {
+			const result = await emailQueries.insert(userId, {
+				outlook_id: email.id,
+				conversation_id: email.conversationId || undefined,
+				internet_message_id: email.internetMessageId || undefined,
+				folder,
+				from_email: email.from?.emailAddress?.address || "",
+				from_name: email.from?.emailAddress?.name || undefined,
+				subject: email.subject || undefined,
+				body_preview: email.bodyPreview || undefined,
+				to_emails:
+					email.toRecipients?.map((r: any) => r.emailAddress?.address) || [],
+				cc_emails:
+					email.ccRecipients?.map((r: any) => r.emailAddress?.address) || [],
+				is_read: email.isRead || false,
+				has_attachments: email.hasAttachments || false,
+				importance: email.importance || "normal",
+				received_at: email.receivedDateTime,
+				sent_at: email.sentDateTime || undefined,
+			});
+
+			if (result) {
+				inserted++;
+			} else {
+				// Email already exists - update it (e.g., read status changed)
+				await emailQueries.updateFromSync(
+					userId,
+					email.id,
+					email.isRead || false,
+				);
+				updated++;
+			}
+		} catch (err) {
+			console.error(`Failed to process email ${email.id}:`, err);
+		}
+	}
+
+	// Update sync state with new delta link
+	if (deltaLink) {
+		await syncQueries.upsert(userId, folder, deltaLink);
+	}
+
+	return { inserted, updated, removed, total: emails.length };
 }
 
 export const emailRoutes = new Elysia({ prefix: "/api/emails" })
-  /**
-   * POST /api/emails/sync
-   * Sync emails from all folders in Microsoft Graph API to local database
-   */
-  .post(
-    "/sync",
-    async ({ headers, query }) => {
-      try {
-        // Get session token from Authorization header
-        const authHeader = headers["authorization"];
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
-          return {
-            success: false,
-            error: "Missing or invalid Authorization header",
-          };
-        }
+	/**
+	 * POST /api/emails/sync
+	 * Sync emails from all folders in Microsoft Graph API to local database
+	 */
+	.post(
+		"/sync",
+		async ({ headers, query }) => {
+			try {
+				const authHeader = headers.authorization;
+				if (!authHeader || !authHeader.startsWith("Bearer ")) {
+					return {
+						success: false,
+						error: "Missing or invalid Authorization header",
+					};
+				}
 
-        const sessionToken = authHeader.replace("Bearer ", "");
+				const sessionToken = authHeader.replace("Bearer ", "");
+				const clerkUserId = await verifyClerkToken(sessionToken);
+				const accessToken = await getMicrosoftToken(clerkUserId);
 
-        // Verify session and get Clerk user ID
-        const clerkUserId = await verifyClerkToken(sessionToken);
+				// Get or create user
+				const user = await getOrCreateUser(clerkUserId);
 
-        // Get Microsoft access token from Clerk
-        const accessToken = await getMicrosoftToken(clerkUserId);
+				// Determine which folders to sync
+				const foldersToSync = query.folder
+					? [query.folder as MailFolder]
+					: MAIL_FOLDERS;
 
-        // Determine which folders to sync
-        const foldersToSync = query.folder
-          ? [query.folder as MailFolder]
-          : MAIL_FOLDERS;
+				// Sync each folder
+				const results: Record<
+					string,
+					{ inserted: number; updated: number; removed: number; total: number }
+				> = {};
+				let totalInserted = 0;
+				let totalUpdated = 0;
+				let totalRemoved = 0;
+				let totalEmails = 0;
 
-        // Sync each folder
-        const results: Record<string, { inserted: number; total: number }> = {};
-        let totalInserted = 0;
-        let totalEmails = 0;
+				for (const folder of foldersToSync) {
+					try {
+						const result = await syncFolder(accessToken, user.id, folder);
+						results[folder] = result;
+						totalInserted += result.inserted;
+						totalUpdated += result.updated;
+						totalRemoved += result.removed;
+						totalEmails += result.total;
+					} catch (err) {
+						console.error(`Error syncing folder ${folder}:`, err);
+						results[folder] = { inserted: 0, updated: 0, removed: 0, total: 0 };
+					}
+				}
 
-        for (const folder of foldersToSync) {
-          try {
-            const result = await syncFolder(accessToken, clerkUserId, folder);
-            results[folder] = result;
-            totalInserted += result.inserted;
-            totalEmails += result.total;
-          } catch (err) {
-            console.error(`Error syncing folder ${folder}:`, err);
-            results[folder] = { inserted: 0, total: 0 };
-          }
-        }
+				return {
+					success: true,
+					inserted: totalInserted,
+					updated: totalUpdated,
+					removed: totalRemoved,
+					total: totalEmails,
+					byFolder: results,
+				};
+			} catch (error) {
+				console.error("Sync error:", error);
+				return {
+					success: false,
+					error: error instanceof Error ? error.message : "Unknown error",
+				};
+			}
+		},
+		{
+			query: t.Object({ folder: t.Optional(t.String()) }),
+			detail: { tags: ["Emails"], summary: "Sync emails from Outlook" },
+		},
+	)
 
-        return {
-          success: true,
-          synced: totalInserted,
-          total: totalEmails,
-          byFolder: results,
-        };
-      } catch (error) {
-        console.error("Sync error:", error);
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
-    },
-    {
-      query: t.Object({
-        folder: t.Optional(t.String()),
-      }),
-      detail: {
-        tags: ["Emails"],
-        summary: "Sync emails from Outlook",
-        description:
-          "Fetches emails from Microsoft Graph API and stores them in local database. Optionally specify a folder to sync only that folder.",
-      },
-    }
-  )
+	/**
+	 * GET /api/emails
+	 * Get emails for the authenticated user, optionally filtered by folder
+	 */
+	.get(
+		"/",
+		async ({ headers, query }) => {
+			try {
+				const authHeader = headers.authorization;
+				if (!authHeader || !authHeader.startsWith("Bearer ")) {
+					return {
+						success: false,
+						error: "Missing or invalid Authorization header",
+					};
+				}
 
-  /**
-   * GET /api/emails
-   * Get emails for the authenticated user, optionally filtered by folder
-   */
-  .get(
-    "/",
-    async ({ headers, query }) => {
-      try {
-        const authHeader = headers["authorization"];
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
-          return {
-            success: false,
-            error: "Missing or invalid Authorization header",
-          };
-        }
+				const sessionToken = authHeader.replace("Bearer ", "");
+				const clerkUserId = await verifyClerkToken(sessionToken);
+				const user = await getOrCreateUser(clerkUserId);
 
-        const sessionToken = authHeader.replace("Bearer ", "");
-        const clerkUserId = await verifyClerkToken(sessionToken);
+				const folder = (query.folder as MailFolder) || "inbox";
+				const emails = await emailQueries.getByFolder(user.id, folder);
 
-        // Get emails - filter by folder if specified
-        const emails = query.folder
-          ? emailQueries.getByFolder.all(clerkUserId, query.folder)
-          : emailQueries.getAllByUser.all(clerkUserId);
+				return { success: true, emails, folder };
+			} catch (error) {
+				console.error("Get emails error:", error);
+				return {
+					success: false,
+					error: error instanceof Error ? error.message : "Unknown error",
+				};
+			}
+		},
+		{
+			query: t.Object({ folder: t.Optional(t.String()) }),
+			detail: { tags: ["Emails"], summary: "Get emails" },
+		},
+	)
 
-        return {
-          success: true,
-          emails: emails.map((email) => ({
-            ...email,
-            to_emails: email.to_emails ? JSON.parse(email.to_emails) : [],
-            cc_emails: email.cc_emails ? JSON.parse(email.cc_emails) : [],
-            is_read: email.is_read === 1,
-            has_attachments: email.has_attachments === 1,
-          })),
-        };
-      } catch (error) {
-        console.error("Fetch emails error:", error);
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
-    },
-    {
-      query: t.Object({
-        folder: t.Optional(t.String()),
-      }),
-      detail: {
-        tags: ["Emails"],
-        summary: "Get emails",
-        description: "Returns emails for the authenticated user. Optionally filter by folder.",
-      },
-    }
-  )
+	/**
+	 * GET /api/emails/counts
+	 * Get folder counts for the authenticated user
+	 */
+	.get(
+		"/counts",
+		async ({ headers }) => {
+			try {
+				const authHeader = headers.authorization;
+				if (!authHeader || !authHeader.startsWith("Bearer ")) {
+					return {
+						success: false,
+						error: "Missing or invalid Authorization header",
+					};
+				}
 
-  /**
-   * GET /api/emails/counts
-   * Get email counts by folder for the authenticated user
-   */
-  .get(
-    "/counts",
-    async ({ headers }) => {
-      try {
-        const authHeader = headers["authorization"];
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
-          return {
-            success: false,
-            error: "Missing or invalid Authorization header",
-          };
-        }
+				const sessionToken = authHeader.replace("Bearer ", "");
+				const clerkUserId = await verifyClerkToken(sessionToken);
+				const user = await getOrCreateUser(clerkUserId);
 
-        const sessionToken = authHeader.replace("Bearer ", "");
-        const clerkUserId = await verifyClerkToken(sessionToken);
+				const rawCounts = await emailQueries.getCounts(user.id);
 
-        const counts = emailQueries.getCountsByFolder.all(clerkUserId);
+				// Format counts by folder
+				const counts: Record<string, { total: number; unread: number }> = {};
+				for (const folder of MAIL_FOLDERS) {
+					counts[folder] = { total: 0, unread: 0 };
+				}
+				for (const row of rawCounts) {
+					counts[row.folder] = {
+						total: Number(row.total),
+						unread: Number(row.unread),
+					};
+				}
 
-        // Convert to a more usable format
-        const countsByFolder: Record<string, { total: number; unread: number }> = {};
-        for (const folder of MAIL_FOLDERS) {
-          countsByFolder[folder] = { total: 0, unread: 0 };
-        }
-        for (const count of counts) {
-          countsByFolder[count.folder] = {
-            total: count.total,
-            unread: count.unread,
-          };
-        }
+				return { success: true, counts };
+			} catch (error) {
+				console.error("Get counts error:", error);
+				return {
+					success: false,
+					error: error instanceof Error ? error.message : "Unknown error",
+				};
+			}
+		},
+		{ detail: { tags: ["Emails"], summary: "Get folder counts" } },
+	)
 
-        return {
-          success: true,
-          counts: countsByFolder,
-        };
-      } catch (error) {
-        console.error("Fetch counts error:", error);
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
-    },
-    {
-      detail: {
-        tags: ["Emails"],
-        summary: "Get email counts by folder",
-        description: "Returns total and unread email counts for each folder",
-      },
-    }
-  )
+	/**
+	 * GET /api/emails/:id/body
+	 * Fetch full email body on demand
+	 */
+	.get(
+		"/:id/body",
+		async ({ headers, params }) => {
+			try {
+				const authHeader = headers.authorization;
+				if (!authHeader || !authHeader.startsWith("Bearer ")) {
+					return {
+						success: false,
+						error: "Missing or invalid Authorization header",
+					};
+				}
 
-  /**
-   * GET /api/emails/:id/body
-   * Get full email body (fetched on-demand from Microsoft Graph)
-   */
-  .get(
-    "/:id/body",
-    async ({ headers, params }) => {
-      try {
-        const authHeader = headers["authorization"];
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
-          return {
-            success: false,
-            error: "Missing or invalid Authorization header",
-          };
-        }
+				const sessionToken = authHeader.replace("Bearer ", "");
+				const clerkUserId = await verifyClerkToken(sessionToken);
+				const accessToken = await getMicrosoftToken(clerkUserId);
 
-        const sessionToken = authHeader.replace("Bearer ", "");
-        const clerkUserId = await verifyClerkToken(sessionToken);
+				const email = await emailQueries.getById(params.id);
+				if (!email) {
+					return { success: false, error: "Email not found" };
+				}
 
-        // Get email from database to get outlook_id
-        const email = emailQueries.getById.get(parseInt(params.id));
+				const body = await fetchEmailBody(accessToken, email.outlook_id);
+				return { success: true, body };
+			} catch (error) {
+				console.error("Get body error:", error);
+				return {
+					success: false,
+					error: error instanceof Error ? error.message : "Unknown error",
+				};
+			}
+		},
+		{
+			params: t.Object({ id: t.String() }),
+			detail: { tags: ["Emails"], summary: "Get email body" },
+		},
+	)
 
-        if (!email || email.clerk_user_id !== clerkUserId) {
-          return {
-            success: false,
-            error: "Email not found",
-          };
-        }
+	/**
+	 * GET /api/emails/thread/:conversationId
+	 * Get all emails in a conversation thread
+	 */
+	.get(
+		"/thread/:conversationId",
+		async ({ headers, params }) => {
+			try {
+				const authHeader = headers.authorization;
+				if (!authHeader || !authHeader.startsWith("Bearer ")) {
+					return {
+						success: false,
+						error: "Missing or invalid Authorization header",
+					};
+				}
 
-        // Fetch full body from Microsoft Graph
-        const accessToken = await getMicrosoftToken(clerkUserId);
-        const body = await fetchEmailBody(accessToken, email.outlook_id);
+				const sessionToken = authHeader.replace("Bearer ", "");
+				const clerkUserId = await verifyClerkToken(sessionToken);
+				const user = await getOrCreateUser(clerkUserId);
 
-        return {
-          success: true,
-          body,
-        };
-      } catch (error) {
-        console.error("Fetch body error:", error);
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
-    },
-    {
-      detail: {
-        tags: ["Emails"],
-        summary: "Get email body",
-        description: "Fetches full email body from Microsoft Graph API",
-      },
-    }
-  )
+				const emails = await emailQueries.getByConversationId(
+					user.id,
+					params.conversationId,
+				);
 
-  /**
-   * PATCH /api/emails/:id/read
-   * Mark email as read
-   */
-  .patch(
-    "/:id/read",
-    async ({ headers, params }) => {
-      try {
-        const authHeader = headers["authorization"];
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
-          return {
-            success: false,
-            error: "Missing or invalid Authorization header",
-          };
-        }
+				if (emails.length === 0) {
+					return { success: false, error: "Thread not found" };
+				}
 
-        const sessionToken = authHeader.replace("Bearer ", "");
-        const clerkUserId = await verifyClerkToken(sessionToken);
+				// Get unique participants
+				const participants = new Set<string>();
+				for (const email of emails) {
+					participants.add(email.from_email);
+				}
 
-        // Get email from database
-        const email = emailQueries.getById.get(parseInt(params.id));
+				return {
+					success: true,
+					thread: {
+						conversationId: params.conversationId,
+						subject: emails[0]?.subject || "(No Subject)",
+						participantCount: participants.size,
+						messageCount: emails.length,
+						emails,
+					},
+				};
+			} catch (error) {
+				console.error("Get thread error:", error);
+				return {
+					success: false,
+					error: error instanceof Error ? error.message : "Unknown error",
+				};
+			}
+		},
+		{
+			params: t.Object({ conversationId: t.String() }),
+			detail: { tags: ["Emails"], summary: "Get email thread" },
+		},
+	)
 
-        if (!email || email.clerk_user_id !== clerkUserId) {
-          return {
-            success: false,
-            error: "Email not found",
-          };
-        }
+	/**
+	 * PATCH /api/emails/:id/read
+	 * Update email read status
+	 */
+	.patch(
+		"/:id/read",
+		async ({ headers, params, body }) => {
+			try {
+				const authHeader = headers.authorization;
+				if (!authHeader || !authHeader.startsWith("Bearer ")) {
+					return {
+						success: false,
+						error: "Missing or invalid Authorization header",
+					};
+				}
 
-        // Mark as read in Microsoft Graph
-        const accessToken = await getMicrosoftToken(clerkUserId);
-        await markEmailAsRead(accessToken, email.outlook_id);
+				const sessionToken = authHeader.replace("Bearer ", "");
+				const clerkUserId = await verifyClerkToken(sessionToken);
+				const accessToken = await getMicrosoftToken(clerkUserId);
 
-        // Update local database
-        emailQueries.markAsRead.run(parseInt(params.id));
+				const email = await emailQueries.getById(params.id);
+				if (!email) {
+					return { success: false, error: "Email not found" };
+				}
 
-        return {
-          success: true,
-        };
-      } catch (error) {
-        console.error("Mark as read error:", error);
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
-    },
-    {
-      detail: {
-        tags: ["Emails"],
-        summary: "Mark email as read",
-        description: "Marks an email as read in both Graph API and local database",
-      },
-    }
-  )
+				const isRead = body.read ?? true;
 
-  /**
-   * POST /api/emails/send
-   * Send a new email
-   */
-  .post(
-    "/send",
-    async ({ headers, body }) => {
-      try {
-        const authHeader = headers["authorization"];
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
-          return {
-            success: false,
-            error: "Missing or invalid Authorization header",
-          };
-        }
+				// Update in Microsoft Graph
+				await updateEmailReadStatus(accessToken, email.outlook_id, isRead);
 
-        const sessionToken = authHeader.replace("Bearer ", "");
-        const clerkUserId = await verifyClerkToken(sessionToken);
+				// Update in local database
+				await emailQueries.updateReadStatus(params.id, isRead);
 
-        const { to, subject, body: emailBody } = body as {
-          to: string[];
-          subject: string;
-          body: string;
-        };
+				return { success: true, read: isRead };
+			} catch (error) {
+				console.error("Update read error:", error);
+				return {
+					success: false,
+					error: error instanceof Error ? error.message : "Unknown error",
+				};
+			}
+		},
+		{
+			params: t.Object({ id: t.String() }),
+			body: t.Object({ read: t.Optional(t.Boolean()) }),
+			detail: { tags: ["Emails"], summary: "Update read status" },
+		},
+	)
 
-        // Send email via Microsoft Graph
-        const accessToken = await getMicrosoftToken(clerkUserId);
-        await sendEmail(accessToken, to, subject, emailBody);
+	/**
+	 * PATCH /api/emails/:id/flag
+	 * Update email flag status and color
+	 */
+	.patch(
+		"/:id/flag",
+		async ({ headers, params, body }) => {
+			try {
+				const authHeader = headers.authorization;
+				if (!authHeader || !authHeader.startsWith("Bearer ")) {
+					return {
+						success: false,
+						error: "Missing or invalid Authorization header",
+					};
+				}
 
-        return {
-          success: true,
-        };
-      } catch (error) {
-        console.error("Send email error:", error);
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
-    },
-    {
-      body: t.Object({
-        to: t.Array(t.String()),
-        subject: t.String(),
-        body: t.String(),
-      }),
-      detail: {
-        tags: ["Emails"],
-        summary: "Send email",
-        description: "Sends a new email via Microsoft Graph API",
-      },
-    }
-  )
+				const sessionToken = authHeader.replace("Bearer ", "");
+				const clerkUserId = await verifyClerkToken(sessionToken);
+				const accessToken = await getMicrosoftToken(clerkUserId);
 
-  /**
-   * POST /api/emails/:id/move
-   * Move email to a different folder
-   */
-  .post(
-    "/:id/move",
-    async ({ headers, params, body }) => {
-      try {
-        const authHeader = headers["authorization"];
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
-          return {
-            success: false,
-            error: "Missing or invalid Authorization header",
-          };
-        }
+				const email = await emailQueries.getById(params.id);
+				if (!email) {
+					return { success: false, error: "Email not found" };
+				}
 
-        const sessionToken = authHeader.replace("Bearer ", "");
-        const clerkUserId = await verifyClerkToken(sessionToken);
+				const flagStatus = body.flagStatus || "flagged";
+				const flagColor = body.flagColor || null;
 
-        // Get email from database
-        const email = emailQueries.getById.get(parseInt(params.id));
+				// Validate color
+				if (flagColor && !FLAG_COLORS.includes(flagColor as FlagColor)) {
+					return {
+						success: false,
+						error: `Invalid flag color. Must be one of: ${FLAG_COLORS.join(", ")}`,
+					};
+				}
 
-        if (!email || email.clerk_user_id !== clerkUserId) {
-          return {
-            success: false,
-            error: "Email not found",
-          };
-        }
+				// Update in Microsoft Graph (only flagStatus, not color)
+				await updateEmailFlag(
+					accessToken,
+					email.outlook_id,
+					flagStatus as "notFlagged" | "flagged" | "complete",
+				);
 
-        const { folder } = body as { folder: string };
+				// Update in local database (includes color)
+				await emailQueries.updateFlag(
+					params.id,
+					flagStatus,
+					flagColor || undefined,
+				);
 
-        // Validate folder
-        if (!MAIL_FOLDERS.includes(folder as MailFolder)) {
-          return {
-            success: false,
-            error: `Invalid folder. Must be one of: ${MAIL_FOLDERS.join(", ")}`,
-          };
-        }
+				return { success: true, flagStatus, flagColor };
+			} catch (error) {
+				console.error("Update flag error:", error);
+				return {
+					success: false,
+					error: error instanceof Error ? error.message : "Unknown error",
+				};
+			}
+		},
+		{
+			params: t.Object({ id: t.String() }),
+			body: t.Object({
+				flagStatus: t.Optional(t.String()),
+				flagColor: t.Optional(t.String()),
+			}),
+			detail: { tags: ["Emails"], summary: "Update flag status" },
+		},
+	)
 
-        // Move email in Microsoft Graph
-        const accessToken = await getMicrosoftToken(clerkUserId);
-        await moveEmail(accessToken, email.outlook_id, folder as GraphMailFolder);
+	/**
+	 * POST /api/emails/:id/move
+	 * Move email to a different folder
+	 */
+	.post(
+		"/:id/move",
+		async ({ headers, params, body }) => {
+			try {
+				const authHeader = headers.authorization;
+				if (!authHeader || !authHeader.startsWith("Bearer ")) {
+					return {
+						success: false,
+						error: "Missing or invalid Authorization header",
+					};
+				}
 
-        // Update local database
-        emailQueries.updateFolder.run(folder, parseInt(params.id));
+				const sessionToken = authHeader.replace("Bearer ", "");
+				const clerkUserId = await verifyClerkToken(sessionToken);
+				const accessToken = await getMicrosoftToken(clerkUserId);
 
-        return {
-          success: true,
-        };
-      } catch (error) {
-        console.error("Move email error:", error);
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
-    },
-    {
-      body: t.Object({
-        folder: t.String(),
-      }),
-      detail: {
-        tags: ["Emails"],
-        summary: "Move email to folder",
-        description: "Moves an email to a different folder in both Graph API and local database",
-      },
-    }
-  )
+				const email = await emailQueries.getById(params.id);
+				if (!email) {
+					return { success: false, error: "Email not found" };
+				}
 
-  /**
-   * DELETE /api/emails/:id
-   * Delete email permanently
-   */
-  .delete(
-    "/:id",
-    async ({ headers, params }) => {
-      try {
-        const authHeader = headers["authorization"];
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
-          return {
-            success: false,
-            error: "Missing or invalid Authorization header",
-          };
-        }
+				const destination = body.destination as GraphMailFolder;
+				if (!MAIL_FOLDERS.includes(destination as MailFolder)) {
+					return { success: false, error: "Invalid destination folder" };
+				}
 
-        const sessionToken = authHeader.replace("Bearer ", "");
-        const clerkUserId = await verifyClerkToken(sessionToken);
+				// Try to move in Microsoft Graph
+				// If it fails (e.g., email already moved/deleted), clean up locally
+				try {
+					await moveEmail(accessToken, email.outlook_id, destination);
+					// Update local database with new folder
+					await emailQueries.updateFolder(params.id, destination);
+				} catch (graphError) {
+					console.warn(
+						`Microsoft Graph move failed (email may not exist): ${graphError}`,
+					);
+					// Email doesn't exist on Microsoft - delete local orphan
+					await emailQueries.delete(params.id);
+				}
 
-        // Get email from database
-        const email = emailQueries.getById.get(parseInt(params.id));
+				return { success: true, folder: destination };
+			} catch (error) {
+				console.error("Move error:", error);
+				return {
+					success: false,
+					error: error instanceof Error ? error.message : "Unknown error",
+				};
+			}
+		},
+		{
+			params: t.Object({ id: t.String() }),
+			body: t.Object({ destination: t.String() }),
+			detail: { tags: ["Emails"], summary: "Move email to folder" },
+		},
+	)
 
-        if (!email || email.clerk_user_id !== clerkUserId) {
-          return {
-            success: false,
-            error: "Email not found",
-          };
-        }
+	/**
+	 * DELETE /api/emails/:id
+	 * Permanently delete an email
+	 */
+	.delete(
+		"/:id",
+		async ({ headers, params }) => {
+			try {
+				const authHeader = headers.authorization;
+				if (!authHeader || !authHeader.startsWith("Bearer ")) {
+					return {
+						success: false,
+						error: "Missing or invalid Authorization header",
+					};
+				}
 
-        // Delete from Microsoft Graph
-        const accessToken = await getMicrosoftToken(clerkUserId);
-        await deleteEmail(accessToken, email.outlook_id);
+				const sessionToken = authHeader.replace("Bearer ", "");
+				const clerkUserId = await verifyClerkToken(sessionToken);
+				const accessToken = await getMicrosoftToken(clerkUserId);
 
-        // Delete from local database
-        emailQueries.delete.run(parseInt(params.id));
+				const email = await emailQueries.getById(params.id);
+				if (!email) {
+					return { success: false, error: "Email not found" };
+				}
 
-        return {
-          success: true,
-        };
-      } catch (error) {
-        console.error("Delete email error:", error);
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
-    },
-    {
-      detail: {
-        tags: ["Emails"],
-        summary: "Delete email permanently",
-        description: "Permanently deletes an email from both Graph API and local database",
-      },
-    }
-  );
+				// Try to delete from Microsoft Graph
+				// If email is in deleteditems, use permanentDelete to truly remove it
+				// Otherwise, regular delete moves it to deleteditems
+				try {
+					if (email.folder === "deleteditems") {
+						console.log(`Permanently deleting email ${email.outlook_id}`);
+						await permanentDeleteEmail(accessToken, email.outlook_id);
+					} else {
+						console.log(`Moving email ${email.outlook_id} to trash`);
+						await deleteEmailGraph(accessToken, email.outlook_id);
+					}
+				} catch (graphError) {
+					console.warn(
+						`Microsoft Graph delete failed (may already be deleted): ${graphError}`,
+					);
+					// Continue to delete locally anyway
+				}
+
+				// Delete from local database
+				await emailQueries.delete(params.id);
+
+				return { success: true };
+			} catch (error) {
+				console.error("Delete error:", error);
+				return {
+					success: false,
+					error: error instanceof Error ? error.message : "Unknown error",
+				};
+			}
+		},
+		{
+			params: t.Object({ id: t.String() }),
+			detail: { tags: ["Emails"], summary: "Delete email permanently" },
+		},
+	);
