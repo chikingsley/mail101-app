@@ -1,0 +1,5 @@
+{
+  "name": "ProjectFlow Mail",
+  "description": "A unified workspace integrating Outlook-style email with project management and SharePoint-like document organization. Features AI-powered context analysis.",
+  "requestFramePermissions": []
+}
