@@ -104,3 +104,23 @@ bun --hot ./index.ts
 ```
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.md`.
+
+## Windows PowerShell Commands
+
+When running PowerShell commands that use `$variables`, the Bash tool's Unix shell strips them. Use this workaround:
+
+1. Write a temporary `.ps1` script file with proper PowerShell syntax
+2. Execute with `powershell -ExecutionPolicy Bypass -File "script.ps1"`
+3. Delete the script after execution
+
+Example:
+```powershell
+# Instead of inline: powershell -Command "$env:PATH = ..."
+# Write to a .ps1 file first, then execute it
+```
+
+This applies to any PowerShell command using:
+- `$env:VARIABLE`
+- `$variableName`
+- `$_` in pipelines
+- Any `$` prefixed syntax

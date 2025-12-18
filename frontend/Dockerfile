@@ -5,7 +5,7 @@ FROM oven/bun:1
 WORKDIR /app
 
 # Copy package files
-COPY package.json bun.lock ./
+COPY package.json bun.lock* ./
 
 # Install dependencies
 RUN bun install
@@ -16,5 +16,5 @@ COPY . .
 # Expose the port
 EXPOSE 3000
 
-# Start the development server
-CMD ["bun", "--hot", "src/index.ts"]
+# Start the development server with hot reload
+CMD ["bun", "run", "--hot", "src/index.ts"]

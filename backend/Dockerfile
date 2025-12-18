@@ -1,11 +1,16 @@
 # Use the official Bun image
 FROM oven/bun:1
 
+# Install CA certificates for TLS/SSL connections (needed for Supabase)
+USER root
+RUN apt-get update && apt-get install -y ca-certificates && update-ca-certificates && rm -rf /var/lib/apt/lists/*
+USER bun
+
 # Set working directory
 WORKDIR /app
 
 # Copy package files
-COPY package.json bun.lock ./
+COPY package.json bun.lock* ./
 
 # Install dependencies
 RUN bun install
@@ -14,7 +19,7 @@ RUN bun install
 COPY . .
 
 # Expose the port
-EXPOSE 3000
+EXPOSE 8000
 
-# Start the server
-CMD ["bun", "run", "src/index.ts"]
+# Start the server with hot reload
+CMD ["bun", "run", "--watch", "src/index.ts"]
