@@ -5,7 +5,7 @@ import {
   threadItemQueries,
   threadQueries,
   userQueries,
-} from "../db/supabase";
+} from "../db/db";
 import { getClerkUser, verifyClerkToken } from "../services/clerk";
 
 // Helper to get or create user from Clerk ID

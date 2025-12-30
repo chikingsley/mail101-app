@@ -1,7 +1,8 @@
 import { cors } from "@elysiajs/cors";
 import { swagger } from "@elysiajs/swagger";
 import { Elysia } from "elysia";
-import { initDatabase } from "./db/supabase";
+import { initDatabase } from "./db/db";
+import { composeRoutes } from "./routes/compose";
 import { emailRoutes } from "./routes/emails";
 import { searchRoutes, threadRoutes } from "./routes/threads";
 import { webhookRoutes } from "./routes/webhook";
@@ -40,8 +41,11 @@ const app = new Elysia()
   .use(webhookRoutes)
   .use(threadRoutes)
   .use(searchRoutes)
-  .listen(process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 8000);
+  .use(composeRoutes)
+  .listen({
+    port: process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 8000,
+    hostname: "0.0.0.0",
+  });
 
-console.log(
-  `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
-);
+console.log(`🦊 Elysia is running at http://localhost:${app.server?.port}`);
+console.log(`🚀 Swagger docs at http://localhost:${app.server?.port}/swagger`);

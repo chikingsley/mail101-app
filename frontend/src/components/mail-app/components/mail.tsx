@@ -1,8 +1,7 @@
-import { ArrowLeft, Layers, Search } from "lucide-react";
+import { ArrowLeft, Layers, PenSquare } from "lucide-react";
 import * as React from "react";
 import type { EmailWithFlags, FolderCounts, MailFolder } from "@/App";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -15,6 +14,7 @@ import type { useEmailActions } from "@/hooks/use-email-actions";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { useMailStore } from "../use-mail";
+import { ComposeDialog } from "./compose-dialog";
 import { CustomThreadView } from "./custom-thread-view";
 import { MailDisplay } from "./mail-display";
 import { MailDisplayMobile } from "./mail-display-mobile";
@@ -22,6 +22,7 @@ import { MailList } from "./mail-list";
 import { MergeDialog } from "./merge-dialog";
 import { NavDesktop } from "./nav-desktop";
 import { NavMobile } from "./nav-mobile";
+import { SearchBar } from "./search-bar";
 
 export type EmailActions = ReturnType<typeof useEmailActions>;
 
@@ -62,6 +63,7 @@ export function Mail({
   emailActions,
 }: MailProps) {
   const [isCollapsed, setIsCollapsed] = React.useState(defaultCollapsed);
+  const [isComposeOpen, setIsComposeOpen] = React.useState(false);
   const isMobile = useIsMobile();
   const {
     selectedMail,
@@ -88,6 +90,21 @@ export function Mail({
     setViewMode("email");
     clearSelection();
   }, [setViewMode, clearSelection]);
+
+  const handleReply = React.useCallback((email: EmailWithFlags) => {
+    // For full implementation, would pass email data to compose dialog
+    setIsComposeOpen(true);
+  }, []);
+
+  const handleReplyAll = React.useCallback((email: EmailWithFlags) => {
+    // For full implementation, would pass email data to compose dialog
+    setIsComposeOpen(true);
+  }, []);
+
+  const handleForward = React.useCallback((email: EmailWithFlags) => {
+    // For full implementation, would pass email data to compose dialog
+    setIsComposeOpen(true);
+  }, []);
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -144,26 +161,36 @@ export function Mail({
             defaultValue="all"
             onValueChange={(value) => setTab(value)}
           >
-            <div className="flex items-center px-4 py-2">
+            <div className="flex items-center justify-between border-b px-4 py-2">
               <div className="flex items-center gap-2">
                 {isMobile && <NavMobile />}
                 <h1 className="font-bold text-xl">
                   {FOLDER_NAMES[currentFolder]}
                 </h1>
               </div>
-              <TabsList className="ml-auto">
-                <TabsTrigger value="all">All</TabsTrigger>
-                <TabsTrigger value="unread">Unread</TabsTrigger>
-              </TabsList>
+              <div className="flex items-center gap-2">
+                <Button
+                  className="gap-2"
+                  onClick={() => setIsComposeOpen(true)}
+                  size="sm"
+                >
+                  <PenSquare className="h-4 w-4" />
+                  Compose
+                </Button>
+                <TabsList>
+                  <TabsTrigger value="all">All</TabsTrigger>
+                  <TabsTrigger value="unread">Unread</TabsTrigger>
+                </TabsList>
+              </div>
             </div>
             <Separator />
             <div className="bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-              <form>
-                <div className="relative">
-                  <Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
-                  <Input className="pl-8" placeholder="Search" />
-                </div>
-              </form>
+              <SearchBar
+                onSearch={(filters) => {
+                  console.log("Search filters:", filters);
+                  // TODO: Implement search functionality
+                }}
+              />
             </div>
             <div className="min-h-0 flex-1">
               <MailList
@@ -206,10 +233,25 @@ export function Mail({
             <MailDisplay
               emailActions={emailActions}
               mail={mails.find((item) => item.id === selectedMail?.id) || null}
+              onForward={handleForward}
+              onReply={handleReply}
+              onReplyAll={handleReplyAll}
             />
           )}
         </ResizablePanel>
       </ResizablePanelGroup>
+
+      {/* Compose Dialog */}
+      <ComposeDialog
+        isOpen={isComposeOpen}
+        mode="new"
+        onClose={() => setIsComposeOpen(false)}
+        onSuccess={() => {
+          // Refresh emails after compose
+          console.log("Email sent, refreshing...");
+          setIsComposeOpen(false);
+        }}
+      />
     </TooltipProvider>
   );
 }

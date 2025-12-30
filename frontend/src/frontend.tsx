@@ -5,15 +5,23 @@
  * It is included in `src/index.html`.
  */
 
+import { ClerkProvider } from "@clerk/clerk-react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { ClerkProvider } from "@clerk/clerk-react";
 import { App } from "./App";
 
-const CLERK_PUBLISHABLE_KEY = process.env.BUN_PUBLIC_CLERK_PUBLISHABLE_KEY;
+const CLERK_PUBLISHABLE_KEY =
+  process.env.BUN_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+  process.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 if (!CLERK_PUBLISHABLE_KEY) {
-  throw new Error("Missing Clerk Publishable Key");
+  console.error(
+    "DEBUG: process.env keys:",
+    Object.keys(process.env).filter((k) => k.includes("CLERK"))
+  );
+  throw new Error(
+    "Missing Clerk Publishable Key (Check BUN_PUBLIC_CLERK_PUBLISHABLE_KEY or VITE_CLERK_PUBLISHABLE_KEY)"
+  );
 }
 
 const elem = document.getElementById("root")!;

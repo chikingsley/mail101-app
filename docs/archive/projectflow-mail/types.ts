@@ -1,12 +1,17 @@
-
 export enum ProjectStatus {
-  ESTIMATING = 'Estimating',
-  ACTIVE = 'Active',
-  COMPLETED = 'Completed',
-  ARCHIVED = 'Archived'
+  ESTIMATING = "Estimating",
+  ACTIVE = "Active",
+  COMPLETED = "Completed",
+  ARCHIVED = "Archived",
 }
 
-export type ProjectStage = 'Lead' | 'Estimating' | 'Bid Sent' | 'Awarded' | 'Active' | 'Closeout';
+export type ProjectStage =
+  | "Lead"
+  | "Estimating"
+  | "Bid Sent"
+  | "Awarded"
+  | "Active"
+  | "Closeout";
 
 export interface User {
   id: string;
@@ -24,14 +29,14 @@ export interface Project {
   stage: ProjectStage;
   description: string;
   address?: string;
-  
+
   // CRM / Monday.com style fields
   siteContact?: string;
   permitNumber?: string;
   budget?: string;
   startDate?: string;
   estimatedCompletion?: string;
-  type: 'Commercial' | 'Residential' | 'Public Works';
+  type: "Commercial" | "Residential" | "Public Works";
 }
 
 export interface Email {
@@ -47,12 +52,18 @@ export interface Email {
   tags: string[]; // e.g. "Bid", "RFI", "Change Order"
 }
 
-export type FileTag = 'Drawing' | 'Plan' | 'Estimate' | 'Contract' | 'Permit' | 'Photo';
+export type FileTag =
+  | "Drawing"
+  | "Plan"
+  | "Estimate"
+  | "Contract"
+  | "Permit"
+  | "Photo";
 
 export interface SharePointFile {
   id: string;
   name: string;
-  type: 'folder' | 'pdf' | 'doc' | 'sheet' | 'image';
+  type: "folder" | "pdf" | "doc" | "sheet" | "image";
   projectId: string;
   lastModified: string;
   timestamp: number; // For sorting in timeline

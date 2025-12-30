@@ -1,6 +1,5 @@
-
 import { GoogleGenAI } from "@google/genai";
-import { Email, Project } from '../types';
+import type { Email, Project } from "../types";
 
 const getClient = () => {
   const apiKey = process.env.API_KEY;
@@ -11,11 +10,16 @@ const getClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-export const analyzeEmailContent = async (email: Email, availableProjects: Project[]) => {
+export const analyzeEmailContent = async (
+  email: Email,
+  availableProjects: Project[]
+) => {
   const ai = getClient();
   if (!ai) return null;
 
-  const projectsList = availableProjects.map(p => `${p.name} (ID: ${p.id})`).join(', ');
+  const projectsList = availableProjects
+    .map((p) => `${p.name} (ID: ${p.id})`)
+    .join(", ");
 
   const prompt = `
     You are a construction project manager assistant. Analyze the following email.
@@ -37,13 +41,13 @@ export const analyzeEmailContent = async (email: Email, availableProjects: Proje
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
-        responseMimeType: 'application/json',
-      }
+        responseMimeType: "application/json",
+      },
     });
-    
+
     const text = response.text;
     if (!text) return null;
     return JSON.parse(text);

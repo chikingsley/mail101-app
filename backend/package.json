@@ -2,7 +2,9 @@
   "name": "backend",
   "version": "1.0.50",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "auth": "bun auth.ts",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
     "dev": "bun run --watch src/index.ts"
   },
   "dependencies": {
@@ -13,7 +15,8 @@
     "elysia": "latest"
   },
   "devDependencies": {
-    "bun-types": "latest"
+    "bun-types": "latest",
+    "typescript": "^5.9.3"
   },
   "module": "src/index.js"
 }

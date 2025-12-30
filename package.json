@@ -10,10 +10,18 @@
     "lint": "bun run typecheck && bunx ultracite check",
     "typecheck": "cd backend && bun tsc --noEmit && cd ../frontend && bun tsc --noEmit",
     "fix": "bunx ultracite fix",
+    "test": "bun run test:backend && bun run test:frontend",
+    "test:backend": "cd backend && bun test",
+    "test:backend:watch": "cd backend && bun test --watch",
+    "test:frontend": "cd frontend && bun test",
+    "test:frontend:watch": "cd frontend && bun test --watch",
+    "test:e2e": "bunx playwright test",
+    "test:e2e:ui": "bunx playwright test --ui",
     "prepare": "husky"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.10",
+    "@playwright/test": "^1.57.0",
     "concurrently": "^9.1.0",
     "husky": "^9.1.7",
     "lint-staged": "^15.3.0",
