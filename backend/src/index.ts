@@ -7,12 +7,17 @@ import { emailRoutes } from "./routes/emails";
 import { searchRoutes, threadRoutes } from "./routes/threads";
 import { webhookRoutes } from "./routes/webhook";
 import { initMeilisearch } from "./services/meilisearch";
+import { createSyncWorker } from "./services/sync-queue";
 
 // Initialize database and search on startup
 await initDatabase();
 await initMeilisearch().catch((err) => {
   console.warn("⚠️ Meilisearch initialization failed (search may be unavailable):", err.message);
 });
+
+// Start the sync worker in the same process
+const worker = createSyncWorker();
+console.log("✅ Sync worker started (in-process)");
 
 const app = new Elysia()
   .use(
@@ -53,3 +58,12 @@ const app = new Elysia()
 
 console.log(`🦊 Elysia is running at http://localhost:${app.server?.port}`);
 console.log(`🚀 Swagger docs at http://localhost:${app.server?.port}/swagger`);
+
+// Graceful shutdown
+const shutdown = async () => {
+  console.log("\n🛑 Shutting down...");
+  await worker.close();
+  process.exit(0);
+};
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
