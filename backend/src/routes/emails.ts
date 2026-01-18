@@ -21,6 +21,9 @@ import {
   updateEmailFlag,
   updateEmailReadStatus,
 } from "../services/graph";
+import { queueSync, getSyncJobStatus } from "../services/sync-queue";
+import { withRateLimit } from "../services/rate-limiter";
+import { searchEmails as meiliSearch, indexEmail } from "../services/meilisearch";
 
 // Valid flag colors (local only - Microsoft Graph doesn't support colors)
 const FLAG_COLORS = [
@@ -37,7 +40,6 @@ type FlagColor = (typeof FLAG_COLORS)[number];
 async function getOrCreateUser(clerkUserId: string) {
   let user = await userQueries.getByClerkId(clerkUserId);
   if (!user) {
-    // Get user info from Clerk and create
     const clerkUser = await getClerkUser(clerkUserId);
     user = await userQueries.getOrCreate(
       clerkUserId,
@@ -50,49 +52,43 @@ async function getOrCreateUser(clerkUserId: string) {
   return user;
 }
 
-// Helper to sync a single folder
+// Helper to sync a single folder (direct sync, not queued)
 async function syncFolder(
   accessToken: string,
   userId: string,
-  folder: MailFolder
+  folder: MailFolder,
+  clerkUserId: string
 ): Promise<{
   inserted: number;
   updated: number;
   removed: number;
   total: number;
 }> {
-  // Check if we have a delta link for this user+folder
   const syncState = await syncQueries.getByUserAndFolder(userId, folder);
 
   let emails: any[] = [];
   let deltaLink: string | undefined;
 
-  if (syncState?.delta_link) {
-    // Use delta sync for incremental updates
-    const deltaResult = await getDeltaEmails(
-      accessToken,
-      folder as GraphMailFolder,
-      syncState.delta_link
-    );
-    emails = deltaResult.emails;
-    deltaLink = deltaResult.deltaLink;
-  } else {
-    // First sync - fetch all emails for this folder
-    const fetchResult = await getDeltaEmails(
-      accessToken,
-      folder as GraphMailFolder
-    );
-    emails = fetchResult.emails;
-    deltaLink = fetchResult.deltaLink;
-  }
+  // Use rate limiter for Graph API calls
+  const deltaResult = await withRateLimit(clerkUserId, async () => {
+    if (syncState?.delta_link) {
+      return getDeltaEmails(
+        accessToken,
+        folder as GraphMailFolder,
+        syncState.delta_link
+      );
+    }
+    return getDeltaEmails(accessToken, folder as GraphMailFolder);
+  });
 
-  // Process emails - handle inserts, updates, and removals
+  emails = deltaResult.emails;
+  deltaLink = deltaResult.deltaLink;
+
   let inserted = 0;
   let updated = 0;
   let removed = 0;
 
   for (const email of emails) {
-    // Check if this is a removal (email deleted or moved out of folder)
     if (email["@removed"]) {
       try {
         await emailQueries.deleteByOutlookId(userId, email.id);
@@ -103,7 +99,6 @@ async function syncFolder(
       continue;
     }
 
-    // Try to insert new email
     try {
       const result = await emailQueries.insert(userId, {
         outlook_id: email.id,
@@ -127,8 +122,30 @@ async function syncFolder(
 
       if (result) {
         inserted++;
+        // Index in Meilisearch
+        try {
+          await indexEmail({
+            id: result.id,
+            user_id: userId,
+            outlook_id: email.id,
+            conversation_id: email.conversationId,
+            folder,
+            from_email: email.from?.emailAddress?.address || "",
+            from_name: email.from?.emailAddress?.name,
+            subject: email.subject,
+            body_preview: email.bodyPreview,
+            to_emails: email.toRecipients?.map((r: any) => r.emailAddress?.address) || [],
+            cc_emails: email.ccRecipients?.map((r: any) => r.emailAddress?.address) || [],
+            is_read: email.isRead,
+            has_attachments: email.hasAttachments,
+            importance: email.importance || "normal",
+            received_at: email.receivedDateTime,
+            sent_at: email.sentDateTime,
+          });
+        } catch (searchErr) {
+          console.warn("Failed to index email in Meilisearch:", searchErr);
+        }
       } else {
-        // Email already exists - update it (e.g., read status changed)
         await emailQueries.updateFromSync(userId, email.id, email.isRead);
         updated++;
       }
@@ -137,7 +154,6 @@ async function syncFolder(
     }
   }
 
-  // Update sync state with new delta link
   if (deltaLink) {
     await syncQueries.upsert(userId, folder, deltaLink);
   }
@@ -148,7 +164,7 @@ async function syncFolder(
 export const emailRoutes = new Elysia({ prefix: "/api/emails" })
   /**
    * POST /api/emails/sync
-   * Sync emails from all folders in Microsoft Graph API to local database
+   * Sync emails - can be direct (blocking) or queued (async)
    */
   .post(
     "/sync",
@@ -164,17 +180,28 @@ export const emailRoutes = new Elysia({ prefix: "/api/emails" })
 
         const sessionToken = authHeader.replace("Bearer ", "");
         const clerkUserId = await verifyClerkToken(sessionToken);
-        const accessToken = await getMicrosoftToken(clerkUserId);
-
-        // Get or create user
         const user = await getOrCreateUser(clerkUserId);
 
-        // Determine which folders to sync
+        // If async=true, queue the sync job
+        if (query.async === "true") {
+          const job = await queueSync(clerkUserId, user.id, {
+            folder: query.folder as MailFolder | undefined,
+          });
+
+          return {
+            success: true,
+            queued: true,
+            jobId: job.id,
+            message: "Sync job queued",
+          };
+        }
+
+        // Direct sync (blocking)
+        const accessToken = await getMicrosoftToken(clerkUserId);
         const foldersToSync = query.folder
           ? [query.folder as MailFolder]
           : MAIL_FOLDERS;
 
-        // Sync each folder
         const results: Record<
           string,
           { inserted: number; updated: number; removed: number; total: number }
@@ -186,7 +213,7 @@ export const emailRoutes = new Elysia({ prefix: "/api/emails" })
 
         for (const folder of foldersToSync) {
           try {
-            const result = await syncFolder(accessToken, user.id, folder);
+            const result = await syncFolder(accessToken, user.id, folder, clerkUserId);
             results[folder] = result;
             totalInserted += result.inserted;
             totalUpdated += result.updated;
@@ -215,8 +242,30 @@ export const emailRoutes = new Elysia({ prefix: "/api/emails" })
       }
     },
     {
-      query: t.Object({ folder: t.Optional(t.String()) }),
+      query: t.Object({
+        folder: t.Optional(t.String()),
+        async: t.Optional(t.String()),
+      }),
       detail: { tags: ["Emails"], summary: "Sync emails from Outlook" },
+    }
+  )
+
+  /**
+   * GET /api/emails/sync/status/:jobId
+   * Get status of a queued sync job
+   */
+  .get(
+    "/sync/status/:jobId",
+    async ({ params }) => {
+      const status = await getSyncJobStatus(params.jobId);
+      if (!status) {
+        return { success: false, error: "Job not found" };
+      }
+      return { success: true, ...status };
+    },
+    {
+      params: t.Object({ jobId: t.String() }),
+      detail: { tags: ["Emails"], summary: "Get sync job status" },
     }
   )
 
@@ -259,6 +308,61 @@ export const emailRoutes = new Elysia({ prefix: "/api/emails" })
   )
 
   /**
+   * GET /api/emails/search
+   * Search emails using Meilisearch
+   */
+  .get(
+    "/search",
+    async ({ headers, query }) => {
+      try {
+        const authHeader = headers.authorization;
+        if (!(authHeader && authHeader.startsWith("Bearer "))) {
+          return {
+            success: false,
+            error: "Missing or invalid Authorization header",
+          };
+        }
+
+        const sessionToken = authHeader.replace("Bearer ", "");
+        const clerkUserId = await verifyClerkToken(sessionToken);
+        const user = await getOrCreateUser(clerkUserId);
+
+        if (!query.q) {
+          return { success: false, error: "Query parameter 'q' is required" };
+        }
+
+        const results = await meiliSearch(user.id, query.q, {
+          folder: query.folder,
+          limit: query.limit ? Number.parseInt(query.limit) : 50,
+          offset: query.offset ? Number.parseInt(query.offset) : 0,
+          hybrid: query.hybrid === "true",
+        });
+
+        return {
+          success: true,
+          ...results,
+        };
+      } catch (error) {
+        console.error("Search error:", error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+        };
+      }
+    },
+    {
+      query: t.Object({
+        q: t.String(),
+        folder: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+        offset: t.Optional(t.String()),
+        hybrid: t.Optional(t.String()),
+      }),
+      detail: { tags: ["Emails"], summary: "Search emails" },
+    }
+  )
+
+  /**
    * GET /api/emails/counts
    * Get folder counts for the authenticated user
    */
@@ -280,7 +384,6 @@ export const emailRoutes = new Elysia({ prefix: "/api/emails" })
 
         const rawCounts = await emailQueries.getCounts(user.id);
 
-        // Format counts by folder
         const counts: Record<string, { total: number; unread: number }> = {};
         for (const folder of MAIL_FOLDERS) {
           counts[folder] = { total: 0, unread: 0 };
@@ -329,7 +432,9 @@ export const emailRoutes = new Elysia({ prefix: "/api/emails" })
           return { success: false, error: "Email not found" };
         }
 
-        const body = await fetchEmailBody(accessToken, email.outlook_id);
+        const body = await withRateLimit(clerkUserId, () =>
+          fetchEmailBody(accessToken, email.outlook_id)
+        );
         return { success: true, body };
       } catch (error) {
         console.error("Get body error:", error);
@@ -374,7 +479,6 @@ export const emailRoutes = new Elysia({ prefix: "/api/emails" })
           return { success: false, error: "Thread not found" };
         }
 
-        // Get unique participants
         const participants = new Set<string>();
         for (const email of emails) {
           participants.add(email.from_email);
@@ -431,10 +535,9 @@ export const emailRoutes = new Elysia({ prefix: "/api/emails" })
 
         const isRead = body.read ?? true;
 
-        // Update in Microsoft Graph
-        await updateEmailReadStatus(accessToken, email.outlook_id, isRead);
-
-        // Update in local database
+        await withRateLimit(clerkUserId, () =>
+          updateEmailReadStatus(accessToken, email.outlook_id, isRead)
+        );
         await emailQueries.updateReadStatus(params.id, isRead);
 
         return { success: true, read: isRead };
@@ -481,7 +584,6 @@ export const emailRoutes = new Elysia({ prefix: "/api/emails" })
         const flagStatus = body.flagStatus || "flagged";
         const flagColor = body.flagColor || null;
 
-        // Validate color
         if (flagColor && !FLAG_COLORS.includes(flagColor as FlagColor)) {
           return {
             success: false,
@@ -489,14 +591,13 @@ export const emailRoutes = new Elysia({ prefix: "/api/emails" })
           };
         }
 
-        // Update in Microsoft Graph (only flagStatus, not color)
-        await updateEmailFlag(
-          accessToken,
-          email.outlook_id,
-          flagStatus as "notFlagged" | "flagged" | "complete"
+        await withRateLimit(clerkUserId, () =>
+          updateEmailFlag(
+            accessToken,
+            email.outlook_id,
+            flagStatus as "notFlagged" | "flagged" | "complete"
+          )
         );
-
-        // Update in local database (includes color)
         await emailQueries.updateFlag(
           params.id,
           flagStatus,
@@ -552,17 +653,15 @@ export const emailRoutes = new Elysia({ prefix: "/api/emails" })
           return { success: false, error: "Invalid destination folder" };
         }
 
-        // Try to move in Microsoft Graph
-        // If it fails (e.g., email already moved/deleted), clean up locally
         try {
-          await moveEmail(accessToken, email.outlook_id, destination);
-          // Update local database with new folder
+          await withRateLimit(clerkUserId, () =>
+            moveEmail(accessToken, email.outlook_id, destination)
+          );
           await emailQueries.updateFolder(params.id, destination);
         } catch (graphError) {
           console.warn(
             `Microsoft Graph move failed (email may not exist): ${graphError}`
           );
-          // Email doesn't exist on Microsoft - delete local orphan
           await emailQueries.delete(params.id);
         }
 
@@ -607,25 +706,24 @@ export const emailRoutes = new Elysia({ prefix: "/api/emails" })
           return { success: false, error: "Email not found" };
         }
 
-        // Try to delete from Microsoft Graph
-        // If email is in deleteditems, use permanentDelete to truly remove it
-        // Otherwise, regular delete moves it to deleteditems
         try {
           if (email.folder === "deleteditems") {
             console.log(`Permanently deleting email ${email.outlook_id}`);
-            await permanentDeleteEmail(accessToken, email.outlook_id);
+            await withRateLimit(clerkUserId, () =>
+              permanentDeleteEmail(accessToken, email.outlook_id)
+            );
           } else {
             console.log(`Moving email ${email.outlook_id} to trash`);
-            await deleteEmailGraph(accessToken, email.outlook_id);
+            await withRateLimit(clerkUserId, () =>
+              deleteEmailGraph(accessToken, email.outlook_id)
+            );
           }
         } catch (graphError) {
           console.warn(
             `Microsoft Graph delete failed (may already be deleted): ${graphError}`
           );
-          // Continue to delete locally anyway
         }
 
-        // Delete from local database
         await emailQueries.delete(params.id);
 
         return { success: true };

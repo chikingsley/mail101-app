@@ -6,9 +6,13 @@ import { composeRoutes } from "./routes/compose";
 import { emailRoutes } from "./routes/emails";
 import { searchRoutes, threadRoutes } from "./routes/threads";
 import { webhookRoutes } from "./routes/webhook";
+import { initMeilisearch } from "./services/meilisearch";
 
-// Initialize database on startup
+// Initialize database and search on startup
 await initDatabase();
+await initMeilisearch().catch((err) => {
+  console.warn("⚠️ Meilisearch initialization failed (search may be unavailable):", err.message);
+});
 
 const app = new Elysia()
   .use(

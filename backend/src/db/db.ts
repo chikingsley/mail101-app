@@ -1,7 +1,12 @@
-import { Database } from "bun:sqlite";
+import postgres from "postgres";
 
-const DB_PATH = process.env.DATABASE_PATH || "database.sqlite";
-export const db = new Database(DB_PATH);
+const DATABASE_URL = process.env.DATABASE_URL || "postgres://mail101:mail101dev@localhost:5432/mail101";
+
+export const sql = postgres(DATABASE_URL, {
+  max: 20,
+  idle_timeout: 20,
+  connect_timeout: 10,
+});
 
 // Supported folders for sync
 export const MAIL_FOLDERS = [
@@ -15,48 +20,31 @@ export const MAIL_FOLDERS = [
 
 export type MailFolder = (typeof MAIL_FOLDERS)[number];
 
-// Helper to handle JSON
-function toJson(obj: any): string {
-  return JSON.stringify(obj || []);
-}
-
-function fromJson(str: string | null): any[] {
-  if (!str) return [];
-  try {
-    return JSON.parse(str);
-  } catch (e) {
-    return [];
-  }
-}
-
 // ============================================
 // INITIALIZATION
 // ============================================
 
 export async function initDatabase() {
-  console.log(`📂 Initializing SQLite database at ${DB_PATH}...`);
-
-  // Enable foreign keys
-  db.run("PRAGMA foreign_keys = ON");
+  console.log("📂 Initializing Postgres database...");
 
   // Create Users table
-  db.run(`
+  await sql`
     CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       clerk_user_id TEXT UNIQUE NOT NULL,
       email TEXT NOT NULL,
       name TEXT,
       avatar_url TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `);
+  `;
 
   // Create Emails table
-  db.run(`
+  await sql`
     CREATE TABLE IF NOT EXISTS emails (
-      id TEXT PRIMARY KEY,
-      user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID REFERENCES users(id) ON DELETE CASCADE,
       outlook_id TEXT NOT NULL,
       conversation_id TEXT,
       internet_message_id TEXT,
@@ -66,98 +54,89 @@ export async function initDatabase() {
       subject TEXT,
       body_preview TEXT,
       body_html TEXT,
-      to_emails TEXT DEFAULT '[]',
-      cc_emails TEXT DEFAULT '[]',
-      is_read INTEGER DEFAULT 0,
-      has_attachments INTEGER DEFAULT 0,
+      to_emails JSONB DEFAULT '[]',
+      cc_emails JSONB DEFAULT '[]',
+      is_read BOOLEAN DEFAULT FALSE,
+      has_attachments BOOLEAN DEFAULT FALSE,
       importance TEXT DEFAULT 'normal',
       flag_status TEXT DEFAULT 'notFlagged',
       flag_color TEXT,
-      received_at TEXT NOT NULL,
-      sent_at TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
+      received_at TIMESTAMPTZ NOT NULL,
+      sent_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(user_id, outlook_id)
     )
-  `);
+  `;
 
   // Create Sync State table
-  db.run(`
+  await sql`
     CREATE TABLE IF NOT EXISTS sync_state (
-      id TEXT PRIMARY KEY,
-      user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID REFERENCES users(id) ON DELETE CASCADE,
       folder TEXT NOT NULL,
       delta_link TEXT,
-      last_sync TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
+      last_sync TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(user_id, folder)
     )
-  `);
+  `;
 
   // Create Webhook Subscriptions table
-  db.run(`
+  await sql`
     CREATE TABLE IF NOT EXISTS webhook_subscriptions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID REFERENCES users(id) ON DELETE CASCADE,
       subscription_id TEXT UNIQUE NOT NULL,
       resource TEXT NOT NULL,
       change_types TEXT NOT NULL,
-      expiration_time TEXT NOT NULL,
+      expiration_time TIMESTAMPTZ NOT NULL,
       client_state TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `);
+  `;
 
   // Create Threads table
-  db.run(`
+  await sql`
     CREATE TABLE IF NOT EXISTS threads (
-      id TEXT PRIMARY KEY,
-      user_id TEXT REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
       title TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `);
+  `;
 
   // Create Thread Items table
-  db.run(`
+  await sql`
     CREATE TABLE IF NOT EXISTS thread_items (
-      id TEXT PRIMARY KEY,
-      thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE NOT NULL,
-      user_id TEXT REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      thread_id UUID REFERENCES threads(id) ON DELETE CASCADE NOT NULL,
+      user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
       item_type TEXT NOT NULL CHECK (item_type IN ('email', 'comment', 'note', 'divider')),
-      email_id TEXT REFERENCES emails(id) ON DELETE SET NULL,
+      email_id UUID REFERENCES emails(id) ON DELETE SET NULL,
       content TEXT,
       position INTEGER DEFAULT 0,
-      item_date TEXT NOT NULL,
-      removed_at TEXT,
-      removed_by TEXT REFERENCES users(id),
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      item_date TIMESTAMPTZ NOT NULL,
+      removed_at TIMESTAMPTZ,
+      removed_by UUID REFERENCES users(id),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `);
+  `;
 
   // Indexes
-  db.run("CREATE INDEX IF NOT EXISTS idx_emails_user ON emails(user_id)");
-  db.run(
-    "CREATE INDEX IF NOT EXISTS idx_emails_folder ON emails(user_id, folder)"
-  );
-  db.run(
-    "CREATE INDEX IF NOT EXISTS idx_emails_conversation ON emails(conversation_id)"
-  );
-  db.run(
-    "CREATE INDEX IF NOT EXISTS idx_emails_received ON emails(received_at)"
-  );
-  db.run(
-    "CREATE INDEX IF NOT EXISTS idx_thread_items_thread ON thread_items(thread_id)"
-  );
-  db.run(
-    "CREATE INDEX IF NOT EXISTS idx_thread_items_email ON thread_items(email_id)"
-  );
+  await sql`CREATE INDEX IF NOT EXISTS idx_emails_user ON emails(user_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_emails_folder ON emails(user_id, folder)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_emails_conversation ON emails(conversation_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_emails_received ON emails(received_at DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_thread_items_thread ON thread_items(thread_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_thread_items_email ON thread_items(email_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_sync_state_user_folder ON sync_state(user_id, folder)`;
 
-  console.log("✅ SQLite database initialized");
+  console.log("✅ Postgres database initialized");
 }
 
 // ============================================
@@ -165,42 +144,40 @@ export async function initDatabase() {
 // ============================================
 
 export const userQueries = {
-  getByClerkId(clerkUserId: string) {
-    return db
-      .query("SELECT * FROM users WHERE clerk_user_id = ?")
-      .get(clerkUserId) as any;
+  async getByClerkId(clerkUserId: string) {
+    const [user] = await sql`
+      SELECT * FROM users WHERE clerk_user_id = ${clerkUserId}
+    `;
+    return user || null;
   },
 
-  getOrCreate(clerkUserId: string, email: string, name?: string) {
-    let user = this.getByClerkId(clerkUserId);
+  async getOrCreate(clerkUserId: string, email: string, name?: string) {
+    let user = await this.getByClerkId(clerkUserId);
     if (!user) {
-      const id = crypto.randomUUID();
-      db.run(
-        "INSERT INTO users (id, clerk_user_id, email, name) VALUES (?, ?, ?, ?)",
-        [id, clerkUserId, email, name || null]
-      );
-      user = this.getByClerkId(clerkUserId);
+      const [newUser] = await sql`
+        INSERT INTO users (clerk_user_id, email, name)
+        VALUES (${clerkUserId}, ${email}, ${name || null})
+        RETURNING *
+      `;
+      user = newUser;
     }
     return user;
   },
 
-  update(
+  async update(
     clerkUserId: string,
     data: { email?: string; name?: string; avatar_url?: string }
   ) {
-    const user = this.getByClerkId(clerkUserId);
-    if (!user) return null;
-
-    db.run(
-      "UPDATE users SET email = COALESCE(?, email), name = COALESCE(?, name), avatar_url = COALESCE(?, avatar_url), updated_at = datetime('now') WHERE clerk_user_id = ?",
-      [
-        data.email || null,
-        data.name || null,
-        data.avatar_url || null,
-        clerkUserId,
-      ]
-    );
-    return this.getByClerkId(clerkUserId);
+    const [user] = await sql`
+      UPDATE users SET
+        email = COALESCE(${data.email || null}, email),
+        name = COALESCE(${data.name || null}, name),
+        avatar_url = COALESCE(${data.avatar_url || null}, avatar_url),
+        updated_at = NOW()
+      WHERE clerk_user_id = ${clerkUserId}
+      RETURNING *
+    `;
+    return user || null;
   },
 };
 
@@ -208,139 +185,142 @@ export const userQueries = {
 // EMAIL QUERIES
 // ============================================
 
-function parseEmail(email: any) {
-  if (!email) return email;
-  return {
-    ...email,
-    to_emails: fromJson(email.to_emails),
-    cc_emails: fromJson(email.cc_emails),
-    is_read: !!email.is_read,
-    has_attachments: !!email.has_attachments,
-  };
-}
-
 export const emailQueries = {
-  getByFolder(userId: string, folder: MailFolder) {
-    const emails = db
-      .query(`
+  async getByFolder(userId: string, folder: MailFolder) {
+    const emails = await sql`
       SELECT e.*,
         (SELECT COUNT(*) FROM emails e2
          WHERE e2.conversation_id = e.conversation_id
          AND e2.user_id = e.user_id) as thread_count
       FROM emails e
-      WHERE e.user_id = ? AND e.folder = ?
+      WHERE e.user_id = ${userId}::uuid AND e.folder = ${folder}
       ORDER BY e.received_at DESC
-    `)
-      .all(userId, folder) as any[];
-    return emails.map(parseEmail);
+    `;
+    return emails;
   },
 
-  getById(id: string) {
-    const email = db.query("SELECT * FROM emails WHERE id = ?").get(id);
-    return parseEmail(email);
+  async getById(id: string) {
+    const [email] = await sql`SELECT * FROM emails WHERE id = ${id}::uuid`;
+    return email || null;
   },
 
-  getByOutlookId(userId: string, outlookId: string) {
-    const email = db
-      .query("SELECT * FROM emails WHERE user_id = ? AND outlook_id = ?")
-      .get(userId, outlookId);
-    return parseEmail(email);
+  async getByOutlookId(userId: string, outlookId: string) {
+    const [email] = await sql`
+      SELECT * FROM emails WHERE user_id = ${userId}::uuid AND outlook_id = ${outlookId}
+    `;
+    return email || null;
   },
 
-  getByConversationId(userId: string, conversationId: string) {
-    const emails = db
-      .query(`
+  async getByConversationId(userId: string, conversationId: string) {
+    const emails = await sql`
       SELECT * FROM emails
-      WHERE user_id = ? AND conversation_id = ?
+      WHERE user_id = ${userId}::uuid AND conversation_id = ${conversationId}
       ORDER BY received_at ASC
-    `)
-      .all(userId, conversationId) as any[];
-    return emails.map(parseEmail);
+    `;
+    return emails;
   },
 
-  insert(userId: string, email: any) {
-    const id = crypto.randomUUID();
-    db.run(
-      `
-      INSERT INTO emails (
-        id, user_id, outlook_id, conversation_id, internet_message_id,
-        folder, from_email, from_name, subject, body_preview,
-        to_emails, cc_emails, is_read, has_attachments, importance,
-        received_at, sent_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (user_id, outlook_id) DO NOTHING
-    `,
-      [
-        id,
-        userId,
-        email.outlook_id,
-        email.conversation_id || null,
-        email.internet_message_id || null,
-        email.folder,
-        email.from_email,
-        email.from_name || null,
-        email.subject || null,
-        email.body_preview || null,
-        toJson(email.to_emails),
-        toJson(email.cc_emails),
-        email.is_read ? 1 : 0,
-        email.has_attachments ? 1 : 0,
-        email.importance || "normal",
-        email.received_at,
-        email.sent_at || null,
-      ]
-    );
-    return this.getById(id);
+  async insert(userId: string, email: {
+    outlook_id: string;
+    conversation_id?: string;
+    internet_message_id?: string;
+    folder: string;
+    from_email: string;
+    from_name?: string;
+    subject?: string;
+    body_preview?: string;
+    to_emails?: string[];
+    cc_emails?: string[];
+    is_read?: boolean;
+    has_attachments?: boolean;
+    importance?: string;
+    received_at: string;
+    sent_at?: string;
+  }) {
+    try {
+      const [inserted] = await sql`
+        INSERT INTO emails (
+          user_id, outlook_id, conversation_id, internet_message_id,
+          folder, from_email, from_name, subject, body_preview,
+          to_emails, cc_emails, is_read, has_attachments, importance,
+          received_at, sent_at
+        ) VALUES (
+          ${userId}::uuid,
+          ${email.outlook_id},
+          ${email.conversation_id || null},
+          ${email.internet_message_id || null},
+          ${email.folder},
+          ${email.from_email},
+          ${email.from_name || null},
+          ${email.subject || null},
+          ${email.body_preview || null},
+          ${JSON.stringify(email.to_emails || [])}::jsonb,
+          ${JSON.stringify(email.cc_emails || [])}::jsonb,
+          ${email.is_read || false},
+          ${email.has_attachments || false},
+          ${email.importance || "normal"},
+          ${email.received_at}::timestamptz,
+          ${email.sent_at || null}::timestamptz
+        )
+        ON CONFLICT (user_id, outlook_id) DO NOTHING
+        RETURNING *
+      `;
+      return inserted || null;
+    } catch (err) {
+      console.error("Insert email error:", err);
+      return null;
+    }
   },
 
-  updateReadStatus(id: string, isRead: boolean) {
-    db.run(
-      "UPDATE emails SET is_read = ?, updated_at = datetime('now') WHERE id = ?",
-      [isRead ? 1 : 0, id]
-    );
+  async updateReadStatus(id: string, isRead: boolean) {
+    await sql`
+      UPDATE emails SET is_read = ${isRead}, updated_at = NOW()
+      WHERE id = ${id}::uuid
+    `;
   },
 
-  updateFlag(id: string, flagStatus: string, flagColor?: string) {
-    db.run(
-      "UPDATE emails SET flag_status = ?, flag_color = ?, updated_at = datetime('now') WHERE id = ?",
-      [flagStatus, flagColor || null, id]
-    );
+  async updateFlag(id: string, flagStatus: string, flagColor?: string) {
+    await sql`
+      UPDATE emails SET
+        flag_status = ${flagStatus},
+        flag_color = ${flagColor || null},
+        updated_at = NOW()
+      WHERE id = ${id}::uuid
+    `;
   },
 
-  updateFolder(id: string, folder: string) {
-    db.run(
-      "UPDATE emails SET folder = ?, updated_at = datetime('now') WHERE id = ?",
-      [folder, id]
-    );
+  async updateFolder(id: string, folder: string) {
+    await sql`
+      UPDATE emails SET folder = ${folder}, updated_at = NOW()
+      WHERE id = ${id}::uuid
+    `;
   },
 
-  updateFromSync(userId: string, outlookId: string, isRead: boolean) {
-    db.run(
-      "UPDATE emails SET is_read = ?, updated_at = datetime('now') WHERE user_id = ? AND outlook_id = ?",
-      [isRead ? 1 : 0, userId, outlookId]
-    );
+  async updateFromSync(userId: string, outlookId: string, isRead: boolean) {
+    await sql`
+      UPDATE emails SET is_read = ${isRead}, updated_at = NOW()
+      WHERE user_id = ${userId}::uuid AND outlook_id = ${outlookId}
+    `;
   },
 
-  delete(id: string) {
-    db.run("DELETE FROM emails WHERE id = ?", [id]);
+  async delete(id: string) {
+    await sql`DELETE FROM emails WHERE id = ${id}::uuid`;
   },
 
-  deleteByOutlookId(userId: string, outlookId: string) {
-    db.run("DELETE FROM emails WHERE user_id = ? AND outlook_id = ?", [
-      userId,
-      outlookId,
-    ]);
+  async deleteByOutlookId(userId: string, outlookId: string) {
+    await sql`
+      DELETE FROM emails WHERE user_id = ${userId}::uuid AND outlook_id = ${outlookId}
+    `;
   },
 
-  getCounts(userId: string) {
-    return db
-      .query(`
-      SELECT folder, COUNT(*) as total, SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END) as unread
+  async getCounts(userId: string) {
+    const counts = await sql`
+      SELECT folder, COUNT(*) as total, SUM(CASE WHEN is_read = false THEN 1 ELSE 0 END) as unread
       FROM emails
-      WHERE user_id = ?
+      WHERE user_id = ${userId}::uuid
       GROUP BY folder
-    `)
-      .all(userId) as any[];
+    `;
+    return counts;
   },
 };
 
@@ -349,26 +329,20 @@ export const emailQueries = {
 // ============================================
 
 export const syncQueries = {
-  getByUserAndFolder(userId: string, folder: string) {
-    return db
-      .query("SELECT * FROM sync_state WHERE user_id = ? AND folder = ?")
-      .get(userId, folder) as any;
+  async getByUserAndFolder(userId: string, folder: string) {
+    const [state] = await sql`
+      SELECT * FROM sync_state WHERE user_id = ${userId}::uuid AND folder = ${folder}
+    `;
+    return state || null;
   },
 
-  upsert(userId: string, folder: string, deltaLink: string) {
-    const existing = this.getByUserAndFolder(userId, folder);
-    if (existing) {
-      db.run(
-        "UPDATE sync_state SET delta_link = ?, last_sync = datetime('now'), updated_at = datetime('now') WHERE user_id = ? AND folder = ?",
-        [deltaLink, userId, folder]
-      );
-    } else {
-      const id = crypto.randomUUID();
-      db.run(
-        "INSERT INTO sync_state (id, user_id, folder, delta_link, last_sync) VALUES (?, ?, ?, ?, datetime('now'))",
-        [id, userId, folder, deltaLink]
-      );
-    }
+  async upsert(userId: string, folder: string, deltaLink: string) {
+    await sql`
+      INSERT INTO sync_state (user_id, folder, delta_link, last_sync)
+      VALUES (${userId}::uuid, ${folder}, ${deltaLink}, NOW())
+      ON CONFLICT (user_id, folder)
+      DO UPDATE SET delta_link = ${deltaLink}, last_sync = NOW(), updated_at = NOW()
+    `;
   },
 };
 
@@ -377,24 +351,24 @@ export const syncQueries = {
 // ============================================
 
 export const subscriptionQueries = {
-  getById(subscriptionId: string) {
-    return db
-      .query(`
+  async getById(subscriptionId: string) {
+    const [sub] = await sql`
       SELECT ws.*, u.clerk_user_id
       FROM webhook_subscriptions ws
       JOIN users u ON ws.user_id = u.id
-      WHERE ws.subscription_id = ?
-    `)
-      .get(subscriptionId) as any;
+      WHERE ws.subscription_id = ${subscriptionId}
+    `;
+    return sub || null;
   },
 
-  getByUser(userId: string) {
-    return db
-      .query("SELECT * FROM webhook_subscriptions WHERE user_id = ?")
-      .all(userId) as any[];
+  async getByUser(userId: string) {
+    const subs = await sql`
+      SELECT * FROM webhook_subscriptions WHERE user_id = ${userId}::uuid
+    `;
+    return subs;
   },
 
-  insert(
+  async insert(
     userId: string,
     subscriptionId: string,
     resource: string,
@@ -402,39 +376,27 @@ export const subscriptionQueries = {
     expirationTime: string,
     clientState: string
   ) {
-    const id = crypto.randomUUID();
-    db.run(
-      `
-      INSERT INTO webhook_subscriptions (id, user_id, subscription_id, resource, change_types, expiration_time, client_state)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `,
-      [
-        id,
-        userId,
-        subscriptionId,
-        resource,
-        changeTypes,
-        expirationTime,
-        clientState,
-      ]
-    );
+    await sql`
+      INSERT INTO webhook_subscriptions (user_id, subscription_id, resource, change_types, expiration_time, client_state)
+      VALUES (${userId}::uuid, ${subscriptionId}, ${resource}, ${changeTypes}, ${expirationTime}::timestamptz, ${clientState})
+    `;
   },
 
-  updateExpiration(subscriptionId: string, expirationTime: string) {
-    db.run(
-      "UPDATE webhook_subscriptions SET expiration_time = ?, updated_at = datetime('now') WHERE subscription_id = ?",
-      [expirationTime, subscriptionId]
-    );
+  async updateExpiration(subscriptionId: string, expirationTime: string) {
+    await sql`
+      UPDATE webhook_subscriptions SET
+        expiration_time = ${expirationTime}::timestamptz,
+        updated_at = NOW()
+      WHERE subscription_id = ${subscriptionId}
+    `;
   },
 
-  delete(subscriptionId: string) {
-    db.run("DELETE FROM webhook_subscriptions WHERE subscription_id = ?", [
-      subscriptionId,
-    ]);
+  async delete(subscriptionId: string) {
+    await sql`DELETE FROM webhook_subscriptions WHERE subscription_id = ${subscriptionId}`;
   },
 
-  deleteByUser(userId: string) {
-    db.run("DELETE FROM webhook_subscriptions WHERE user_id = ?", [userId]);
+  async deleteByUser(userId: string) {
+    await sql`DELETE FROM webhook_subscriptions WHERE user_id = ${userId}::uuid`;
   },
 };
 
@@ -443,179 +405,154 @@ export const subscriptionQueries = {
 // ============================================
 
 export const threadQueries = {
-  create(userId: string, title?: string) {
-    const id = crypto.randomUUID();
-    db.run("INSERT INTO threads (id, user_id, title) VALUES (?, ?, ?)", [
-      id,
-      userId,
-      title || null,
-    ]);
-    return this.getById(id);
+  async create(userId: string, title?: string) {
+    const [thread] = await sql`
+      INSERT INTO threads (user_id, title)
+      VALUES (${userId}::uuid, ${title || null})
+      RETURNING *
+    `;
+    return thread;
   },
 
-  getById(threadId: string) {
-    return db.query("SELECT * FROM threads WHERE id = ?").get(threadId) as any;
+  async getById(threadId: string) {
+    const [thread] = await sql`SELECT * FROM threads WHERE id = ${threadId}::uuid`;
+    return thread || null;
   },
 
-  getByUser(userId: string) {
-    return db
-      .query(`
+  async getByUser(userId: string) {
+    const threads = await sql`
       SELECT t.*,
         (SELECT COUNT(*) FROM thread_items ti WHERE ti.thread_id = t.id AND ti.removed_at IS NULL) as item_count,
         (SELECT COUNT(*) FROM thread_items ti WHERE ti.thread_id = t.id AND ti.item_type = 'email' AND ti.removed_at IS NULL) as email_count,
         (SELECT MAX(ti.item_date) FROM thread_items ti WHERE ti.thread_id = t.id AND ti.removed_at IS NULL) as last_activity
       FROM threads t
-      WHERE t.user_id = ?
+      WHERE t.user_id = ${userId}::uuid
       ORDER BY t.updated_at DESC
-    `)
-      .all(userId) as any[];
+    `;
+    return threads;
   },
 
-  updateTitle(threadId: string, title: string) {
-    db.run(
-      "UPDATE threads SET title = ?, updated_at = datetime('now') WHERE id = ?",
-      [title, threadId]
-    );
-    return this.getById(threadId);
+  async updateTitle(threadId: string, title: string) {
+    const [thread] = await sql`
+      UPDATE threads SET title = ${title}, updated_at = NOW()
+      WHERE id = ${threadId}::uuid
+      RETURNING *
+    `;
+    return thread || null;
   },
 
-  delete(threadId: string) {
-    db.run("DELETE FROM threads WHERE id = ?", [threadId]);
+  async delete(threadId: string) {
+    await sql`DELETE FROM threads WHERE id = ${threadId}::uuid`;
   },
 
-  getWithItems(threadId: string, includeRemoved = false) {
-    const thread = this.getById(threadId);
+  async getWithItems(threadId: string, includeRemoved = false) {
+    const thread = await this.getById(threadId);
     if (!thread) return null;
 
-    const query = includeRemoved
-      ? `
-        SELECT ti.*, e.from_email, e.from_name, e.subject, e.body_preview, e.received_at as email_received_at,
-               e.to_emails, e.cc_emails, e.is_read, e.has_attachments, e.outlook_id
-        FROM thread_items ti
-        LEFT JOIN emails e ON ti.email_id = e.id
-        WHERE ti.thread_id = ?
-        ORDER BY ti.item_date ASC
-      `
-      : `
-        SELECT ti.*, e.from_email, e.from_name, e.subject, e.body_preview, e.received_at as email_received_at,
-               e.to_emails, e.cc_emails, e.is_read, e.has_attachments, e.outlook_id
-        FROM thread_items ti
-        LEFT JOIN emails e ON ti.email_id = e.id
-        WHERE ti.thread_id = ? AND ti.removed_at IS NULL
-        ORDER BY ti.item_date ASC
-      `;
+    const items = includeRemoved
+      ? await sql`
+          SELECT ti.*, e.from_email, e.from_name, e.subject, e.body_preview, e.received_at as email_received_at,
+                 e.to_emails, e.cc_emails, e.is_read, e.has_attachments, e.outlook_id
+          FROM thread_items ti
+          LEFT JOIN emails e ON ti.email_id = e.id
+          WHERE ti.thread_id = ${threadId}::uuid
+          ORDER BY ti.item_date ASC
+        `
+      : await sql`
+          SELECT ti.*, e.from_email, e.from_name, e.subject, e.body_preview, e.received_at as email_received_at,
+                 e.to_emails, e.cc_emails, e.is_read, e.has_attachments, e.outlook_id
+          FROM thread_items ti
+          LEFT JOIN emails e ON ti.email_id = e.id
+          WHERE ti.thread_id = ${threadId}::uuid AND ti.removed_at IS NULL
+          ORDER BY ti.item_date ASC
+        `;
 
-    const items = db.query(query).all(threadId) as any[];
-    const parsedItems = items.map((item: any) => ({
-      ...item,
-      to_emails: fromJson(item.to_emails),
-      cc_emails: fromJson(item.cc_emails),
-      is_read: !!item.is_read,
-      has_attachments: !!item.has_attachments,
-    }));
-
-    return { ...thread, items: parsedItems };
+    return { ...thread, items };
   },
 };
 
 export const threadItemQueries = {
-  addEmail(
-    threadId: string,
-    userId: string,
-    emailId: string,
-    itemDate: string
-  ) {
+  async addEmail(threadId: string, userId: string, emailId: string, itemDate: string) {
     // Check if already exists
-    const existing = db
-      .query(
-        "SELECT * FROM thread_items WHERE thread_id = ? AND email_id = ? AND removed_at IS NULL"
-      )
-      .get(threadId, emailId);
+    const [existing] = await sql`
+      SELECT * FROM thread_items
+      WHERE thread_id = ${threadId}::uuid AND email_id = ${emailId}::uuid AND removed_at IS NULL
+    `;
     if (existing) return null;
 
-    const id = crypto.randomUUID();
-    db.run(
-      `
-      INSERT INTO thread_items (id, thread_id, user_id, item_type, email_id, item_date)
-      VALUES (?, ?, ?, 'email', ?, ?)
-    `,
-      [id, threadId, userId, emailId, itemDate]
-    );
-    return db.query("SELECT * FROM thread_items WHERE id = ?").get(id);
+    const [item] = await sql`
+      INSERT INTO thread_items (thread_id, user_id, item_type, email_id, item_date)
+      VALUES (${threadId}::uuid, ${userId}::uuid, 'email', ${emailId}::uuid, ${itemDate}::timestamptz)
+      RETURNING *
+    `;
+    return item;
   },
 
-  addComment(threadId: string, userId: string, content: string) {
-    const id = crypto.randomUUID();
-    db.run(
-      `
-      INSERT INTO thread_items (id, thread_id, user_id, item_type, content, item_date)
-      VALUES (?, ?, ?, 'comment', ?, datetime('now'))
-    `,
-      [id, threadId, userId, content]
-    );
-    return db.query("SELECT * FROM thread_items WHERE id = ?").get(id);
+  async addComment(threadId: string, userId: string, content: string) {
+    const [item] = await sql`
+      INSERT INTO thread_items (thread_id, user_id, item_type, content, item_date)
+      VALUES (${threadId}::uuid, ${userId}::uuid, 'comment', ${content}, NOW())
+      RETURNING *
+    `;
+    return item;
   },
 
-  addNote(threadId: string, userId: string, content: string) {
-    const id = crypto.randomUUID();
-    db.run(
-      `
-      INSERT INTO thread_items (id, thread_id, user_id, item_type, content, item_date)
-      VALUES (?, ?, ?, 'note', ?, datetime('now'))
-    `,
-      [id, threadId, userId, content]
-    );
-    return db.query("SELECT * FROM thread_items WHERE id = ?").get(id);
+  async addNote(threadId: string, userId: string, content: string) {
+    const [item] = await sql`
+      INSERT INTO thread_items (thread_id, user_id, item_type, content, item_date)
+      VALUES (${threadId}::uuid, ${userId}::uuid, 'note', ${content}, NOW())
+      RETURNING *
+    `;
+    return item;
   },
 
-  addDivider(threadId: string, userId: string, content?: string) {
-    const id = crypto.randomUUID();
-    db.run(
-      `
-      INSERT INTO thread_items (id, thread_id, user_id, item_type, content, item_date)
-      VALUES (?, ?, ?, 'divider', ?, datetime('now'))
-    `,
-      [id, threadId, userId, content || null]
-    );
-    return db.query("SELECT * FROM thread_items WHERE id = ?").get(id);
+  async addDivider(threadId: string, userId: string, content?: string) {
+    const [item] = await sql`
+      INSERT INTO thread_items (thread_id, user_id, item_type, content, item_date)
+      VALUES (${threadId}::uuid, ${userId}::uuid, 'divider', ${content || null}, NOW())
+      RETURNING *
+    `;
+    return item;
   },
 
-  remove(itemId: string, removedBy: string) {
-    db.run(
-      "UPDATE thread_items SET removed_at = datetime('now'), removed_by = ? WHERE id = ?",
-      [removedBy, itemId]
-    );
-    return db.query("SELECT * FROM thread_items WHERE id = ?").get(itemId);
+  async remove(itemId: string, removedBy: string) {
+    const [item] = await sql`
+      UPDATE thread_items SET removed_at = NOW(), removed_by = ${removedBy}::uuid
+      WHERE id = ${itemId}::uuid
+      RETURNING *
+    `;
+    return item || null;
   },
 
-  restore(itemId: string) {
-    db.run(
-      "UPDATE thread_items SET removed_at = NULL, removed_by = NULL WHERE id = ?",
-      [itemId]
-    );
-    return db.query("SELECT * FROM thread_items WHERE id = ?").get(itemId);
+  async restore(itemId: string) {
+    const [item] = await sql`
+      UPDATE thread_items SET removed_at = NULL, removed_by = NULL
+      WHERE id = ${itemId}::uuid
+      RETURNING *
+    `;
+    return item || null;
   },
 
-  permanentDelete(itemId: string) {
-    db.run("DELETE FROM thread_items WHERE id = ?", [itemId]);
+  async permanentDelete(itemId: string) {
+    await sql`DELETE FROM thread_items WHERE id = ${itemId}::uuid`;
   },
 
-  updateContent(itemId: string, content: string) {
-    db.run(
-      "UPDATE thread_items SET content = ?, updated_at = datetime('now') WHERE id = ?",
-      [content, itemId]
-    );
-    return db.query("SELECT * FROM thread_items WHERE id = ?").get(itemId);
+  async updateContent(itemId: string, content: string) {
+    const [item] = await sql`
+      UPDATE thread_items SET content = ${content}, updated_at = NOW()
+      WHERE id = ${itemId}::uuid
+      RETURNING *
+    `;
+    return item || null;
   },
 
-  getThreadsContainingEmail(emailId: string) {
-    return db
-      .query(`
+  async getThreadsContainingEmail(emailId: string) {
+    const threads = await sql`
       SELECT t.* FROM threads t
       JOIN thread_items ti ON t.id = ti.thread_id
-      WHERE ti.email_id = ? AND ti.removed_at IS NULL
-    `)
-      .all(emailId) as any[];
+      WHERE ti.email_id = ${emailId}::uuid AND ti.removed_at IS NULL
+    `;
+    return threads;
   },
 };
 
@@ -624,42 +561,42 @@ export const threadItemQueries = {
 // ============================================
 
 export const searchQueries = {
-  searchEmails(userId: string, query: string, limit = 50, offset = 0) {
-    // Simple LIKE search for now, could be upgraded to FTS5
+  async searchEmails(userId: string, query: string, limit = 50, offset = 0) {
     const searchPattern = `%${query}%`;
-    const emails = db
-      .query(`
+    const emails = await sql`
       SELECT * FROM emails
-      WHERE user_id = ? AND (subject LIKE ? OR from_name LIKE ? OR from_email LIKE ? OR body_preview LIKE ?)
+      WHERE user_id = ${userId}::uuid
+        AND (subject ILIKE ${searchPattern}
+             OR from_name ILIKE ${searchPattern}
+             OR from_email ILIKE ${searchPattern}
+             OR body_preview ILIKE ${searchPattern})
       ORDER BY received_at DESC
-      LIMIT ? OFFSET ?
-    `)
-      .all(
-        userId,
-        searchPattern,
-        searchPattern,
-        searchPattern,
-        searchPattern,
-        limit,
-        offset
-      ) as any[];
-    return emails.map(parseEmail);
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+    return emails;
   },
 
-  searchEmailsCount(userId: string, query: string) {
+  async searchEmailsCount(userId: string, query: string) {
     const searchPattern = `%${query}%`;
-    const result = db
-      .query(`
+    const [result] = await sql`
       SELECT COUNT(*) as count FROM emails
-      WHERE user_id = ? AND (subject LIKE ? OR from_name LIKE ? OR from_email LIKE ? OR body_preview LIKE ?)
-    `)
-      .get(
-        userId,
-        searchPattern,
-        searchPattern,
-        searchPattern,
-        searchPattern
-      ) as any;
+      WHERE user_id = ${userId}::uuid
+        AND (subject ILIKE ${searchPattern}
+             OR from_name ILIKE ${searchPattern}
+             OR from_email ILIKE ${searchPattern}
+             OR body_preview ILIKE ${searchPattern})
+    `;
     return result?.count || 0;
   },
 };
+
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  await sql.end();
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  await sql.end();
+  process.exit(0);
+});
