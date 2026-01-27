@@ -13,7 +13,8 @@ import {
   Trash2,
   Users2,
 } from "lucide-react";
-import * as React from "react";
+import type { ImperativePanelHandle } from "react-resizable-panels";
+import { useCallback, useRef, useState } from "react";
 import { AccountSwitcher } from "@/components/mail/account-switcher";
 import { MailDisplay } from "@/components/mail/mail-display";
 import { MailList } from "@/components/mail/mail-list";
@@ -30,6 +31,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Mail as MailType } from "@/data";
 import { cn } from "@/lib/utils";
 import { useMail } from "@/use-mail";
+
+// Shared header height for alignment across panels
+const HEADER_HEIGHT = "h-14";
 
 interface MailProps {
   accounts: {
@@ -51,21 +55,23 @@ export function Mail({
   defaultCollapsed = false,
   navCollapsedSize,
 }: MailProps) {
-  const [isCollapsed, setIsCollapsed] = React.useState(defaultCollapsed);
+  const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
   const [mail] = useMail();
+  const navPanelRef = useRef<ImperativePanelHandle>(null);
+
+  // Handle panel resize to detect collapse state
+  const handlePanelResize = useCallback((size: number) => {
+    setIsCollapsed(size <= navCollapsedSize);
+  }, [navCollapsedSize]);
 
   return (
     <TooltipProvider delayDuration={0}>
       <ResizablePanelGroup
         className="h-full items-stretch"
         direction="horizontal"
-        onLayout={(sizes: number[]) => {
-          document.cookie = `react-resizable-panels:layout:mail=${JSON.stringify(
-            sizes
-          )}`;
-        }}
       >
         <ResizablePanel
+          ref={navPanelRef}
           className={cn(
             isCollapsed &&
               "min-w-[50px] transition-all duration-300 ease-in-out"
@@ -75,23 +81,13 @@ export function Mail({
           defaultSize={defaultLayout[0]}
           maxSize={20}
           minSize={15}
-          onCollapse={() => {
-            setIsCollapsed(true);
-            document.cookie = `react-resizable-panels:collapsed=${JSON.stringify(
-              true
-            )}`;
-          }}
-          onResize={() => {
-            setIsCollapsed(false);
-            document.cookie = `react-resizable-panels:collapsed=${JSON.stringify(
-              false
-            )}`;
-          }}
+          onResize={handlePanelResize}
         >
           <div
             className={cn(
-              "flex h-[52px] items-center justify-center",
-              isCollapsed ? "h-[52px]" : "px-2"
+              "flex items-center justify-center",
+              HEADER_HEIGHT,
+              !isCollapsed && "px-2"
             )}
           >
             <AccountSwitcher accounts={accounts} isCollapsed={isCollapsed} />
@@ -178,7 +174,7 @@ export function Mail({
         <ResizableHandle withHandle />
         <ResizablePanel defaultSize={defaultLayout[1]} minSize={30}>
           <Tabs defaultValue="all">
-            <div className="flex items-center px-4 py-2">
+            <div className={cn("flex items-center px-4", HEADER_HEIGHT)}>
               <h1 className="font-bold text-xl">Inbox</h1>
               <TabsList className="ml-auto">
                 <TabsTrigger
