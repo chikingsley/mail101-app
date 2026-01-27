@@ -22,11 +22,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.production.local
 .env.local
 
-# SQLite database files
-*.db
-*.db-shm
-*.db-wal
-
 # caches
 .eslintcache
 .cache
@@ -37,6 +32,3 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
-
-/generated/prisma
-.graph-token-cache
