@@ -351,61 +351,22 @@ const server = serve({
         }
       }
 
-      // Signal 4: Check subject line for project name matches (with partial matching)
+      // Signal 4: Check subject line for project name matches
+      // Note: Heavy lifting should be in census sync, not UI
+      // This just shows what the DB has linked
       if (email.subject) {
         const allProjects = census.getAllProjectNames();
-        // Normalize subject: remove Re:/FW:, lowercase
-        const normalizedSubject = email.subject
-          .replace(/^(re|fw|fwd):\s*/gi, "")
-          .toLowerCase()
-          .trim();
-        
+        const lowerSubject = email.subject.toLowerCase();
         for (const [projectId, projectName] of allProjects) {
-          if (projectName.length < 5) continue;
-          
-          const lowerProjectName = projectName.toLowerCase();
-          
-          // Exact match in subject
-          if (normalizedSubject.includes(lowerProjectName)) {
+          if (
+            projectName.length > 4 &&
+            lowerSubject.includes(projectName.toLowerCase())
+          ) {
             if (!suggestions.some((s) => s.projectId === projectId)) {
               suggestions.push({
                 projectId,
                 reason: `Project name "${projectName}" found in subject`,
-                confidence: 0.85,
-                signalType: "subject",
-              });
-            }
-            continue;
-          }
-          
-          // Partial match: if subject is part of project name (e.g., "Diamond View" matches "Diamond View at Ballpark")
-          // Or if project name words are in subject
-          const projectWords = lowerProjectName.split(/\s+/).filter(w => w.length > 3);
-          const subjectWords = normalizedSubject.split(/\s+/).filter(w => w.length > 3);
-          
-          // Check if normalized subject is contained in project name
-          if (lowerProjectName.includes(normalizedSubject) && normalizedSubject.length > 8) {
-            if (!suggestions.some((s) => s.projectId === projectId)) {
-              suggestions.push({
-                projectId,
-                reason: `Subject "${normalizedSubject}" matches project "${projectName}"`,
-                confidence: 0.75,
-                signalType: "subject",
-              });
-            }
-            continue;
-          }
-          
-          // Check if enough significant words match
-          const matchingWords = projectWords.filter(pw => 
-            subjectWords.some(sw => sw === pw || pw.includes(sw) || sw.includes(pw))
-          );
-          if (matchingWords.length >= 2 && matchingWords.length >= projectWords.length * 0.5) {
-            if (!suggestions.some((s) => s.projectId === projectId)) {
-              suggestions.push({
-                projectId,
-                reason: `Subject words match project "${projectName}"`,
-                confidence: 0.6,
+                confidence: 0.7,
                 signalType: "subject",
               });
             }
