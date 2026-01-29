@@ -45,8 +45,20 @@ const server = serve({
     "/api/mailboxes": async () => {
       const census = await getDb();
       const mailboxes = census.getAllMailboxes();
+      
+      // Get actual email counts from DB (mailbox.emailCount can be stale)
+      const mailboxesWithActualCounts = mailboxes.map((mb) => {
+        const actualCount = census.db
+          .query("SELECT COUNT(*) as c FROM emails WHERE mailbox_id = ?")
+          .get(mb.id) as { c: number };
+        return {
+          ...mb,
+          emailCount: actualCount.c, // Override with actual count
+        };
+      });
+      
       return json({
-        mailboxes,
+        mailboxes: mailboxesWithActualCounts,
         actionable: ACTIONABLE_MAILBOXES,
       });
     },

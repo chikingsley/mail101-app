@@ -171,33 +171,38 @@ export function CommandCenter() {
     setActiveWorkflow(type);
   }, []);
 
-  // Nav links - counts are for current mailbox
+  // Calculate filter counts from loaded emails
+  const needsTriageCount = emails.filter((e) => !e.projectId && !e.classification).length;
+  const linkedToProjectCount = emails.filter((e) => e.projectId !== null).length;
+  const hasAccountCount = emails.filter((e) => e.accountId !== null).length;
+
+  // Nav links - counts are for the currently loaded emails (not total mailbox)
   const navLinks: NavLink[] = [
     {
       title: "All",
       icon: Inbox,
-      count: emailsData?.total,
+      count: emails.length,
       active: activeFilter === "all",
       onClick: () => setActiveFilter("all"),
     },
     {
       title: "Needs Triage",
       icon: Filter,
-      count: emails.filter((e) => !e.projectId && !e.classification).length,
+      count: needsTriageCount,
       active: activeFilter === "needs-triage",
       onClick: () => setActiveFilter("needs-triage"),
     },
     {
-      title: "Linked",
+      title: "Linked to Project",
       icon: FolderOpen,
-      count: emails.filter((e) => e.projectId !== null).length,
+      count: linkedToProjectCount,
       active: activeFilter === "by-project",
       onClick: () => setActiveFilter("by-project"),
     },
     {
-      title: "Has Account",
+      title: "Has Contractor",
       icon: Building2,
-      count: emails.filter((e) => e.accountId !== null).length,
+      count: hasAccountCount,
       active: activeFilter === "by-account",
       onClick: () => setActiveFilter("by-account"),
     },
