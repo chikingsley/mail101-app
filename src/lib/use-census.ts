@@ -142,6 +142,10 @@ export function useAccount(domain: string | null) {
   return useFetch<AccountDetailResponse>(domain ? `/api/accounts/${domain}` : null);
 }
 
+export function useAccountById(id: number | null) {
+  return useFetch<AccountDetailResponse>(id ? `/api/accounts/by-id/${id}` : null);
+}
+
 // ============================================
 // Projects
 // ============================================
@@ -282,9 +286,9 @@ export function useEmailContext(email: CensusEmail | null) {
   // Get project if linked
   const { data: projectData } = useProject(email?.projectId ?? null);
   
-  // Get account if available
-  const accountDomain = email?.fromEmail?.split("@")[1] ?? null;
-  const { data: accountData } = useAccount(accountDomain);
+  // Get account using the email's accountId (not sender domain!)
+  // This uses the properly linked account from the database
+  const { data: accountData } = useAccountById(email?.accountId ?? null);
   
   // Get link suggestions
   const { data: suggestionsData } = useLinkSuggestions(email?.id ?? null);

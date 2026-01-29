@@ -175,6 +175,39 @@ const server = serve({
       return json({ accounts });
     },
 
+    "/api/accounts/by-id/:id": async (req) => {
+      const id = Number.parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) {
+        return json({ error: "Invalid account ID" }, 400);
+      }
+      const census = await getDb();
+      
+      // Query account by ID directly
+      const row = census.db
+        .query("SELECT * FROM accounts WHERE id = ?")
+        .get(id) as Record<string, unknown> | null;
+      
+      if (!row) {
+        return json({ error: "Account not found" }, 404);
+      }
+      
+      // Parse account row
+      const account = {
+        id: row.id as number,
+        domain: row.domain as string,
+        name: row.name as string,
+        type: row.type as string,
+        contactCount: row.contact_count as number,
+        emailCount: row.email_count as number,
+        createdAt: row.created_at as string,
+        updatedAt: row.updated_at as string,
+      };
+      
+      const projects = census.getProjectsForAccount(id);
+      const emails = census.getEmailsForAccount(id);
+      return json({ account, projects, emails: emails.slice(0, 50) });
+    },
+
     "/api/accounts/:domain": async (req) => {
       const domain = decodeURIComponent(req.params.domain);
       const census = await getDb();

@@ -2,14 +2,16 @@
  * Project Context Panel
  *
  * Shows full context when an email is selected:
- * - Account info (contractor)
+ * - Account info (contractor) - only when linked
  * - Project info if linked
  * - Estimate details
  * - Email history
+ * - Link suggestions when unlinked
  */
 
 import { format } from "date-fns";
 import {
+  AlertCircle,
   Building2,
   Calendar,
   DollarSign,
@@ -76,154 +78,51 @@ export function ProjectContext({
       (account && e.accountDomain === account.domain)
   );
 
+  // Determine if this email has any linked context
+  const hasContext = account || project || matchingEstimate;
+  const isUnlinked = !project && !email.classification;
+
   return (
     <ScrollArea className="h-full">
-      <div className="p-4 space-y-6">
-        {/* Email Subject Header */}
+      <div className="p-4 space-y-4">
+        {/* Email Header */}
         <div className="space-y-2">
           <h2 className="font-semibold text-base leading-tight">
             {email.subject ?? "(No subject)"}
           </h2>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>From: {email.fromName ?? email.fromEmail}</span>
+          <div className="text-sm text-muted-foreground">
+            From: {email.fromName ?? email.fromEmail}
           </div>
-          {project && (
-            <Badge variant="default" className="mt-1">
-              Linked: {project.name}
-            </Badge>
-          )}
-          {email.classification && (
-            <Badge variant="outline" className="ml-2 uppercase">
-              {email.classification}
-            </Badge>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {project && (
+              <Badge variant="default">
+                <FileText className="mr-1 h-3 w-3" />
+                {project.name}
+              </Badge>
+            )}
+            {account && (
+              <Badge variant="secondary">
+                <Building2 className="mr-1 h-3 w-3" />
+                {account.name}
+              </Badge>
+            )}
+            {email.classification && (
+              <Badge variant="outline" className="uppercase">
+                {email.classification}
+              </Badge>
+            )}
+            {isUnlinked && (
+              <Badge variant="destructive" className="bg-amber-500">
+                <AlertCircle className="mr-1 h-3 w-3" />
+                Needs Triage
+              </Badge>
+            )}
+          </div>
         </div>
 
         <Separator />
 
-        {/* Decision Checks */}
-        <section className="space-y-3">
-          <h3 className="font-semibold text-sm">Checks</h3>
-          <DecisionChecks email={email} estimate={matchingEstimate ?? null} />
-        </section>
-
-        <Separator />
-
-        {/* Sender Company Section - only show if meaningful (>1 email from them) */}
-        {account && account.emailCount > 1 && (
-          <section className="space-y-3">
-            <h3 className="flex items-center gap-2 font-semibold text-sm">
-              <Building2 className="h-4 w-4" />
-              Sender: {account.name}
-            </h3>
-            <div className="rounded-lg border p-3 space-y-2">
-              <div className="text-sm text-muted-foreground">
-                {account.domain}
-              </div>
-              <div className="flex gap-4 text-xs text-muted-foreground">
-                <span>{account.emailCount} total emails</span>
-                {account.contactCount > 0 && <span>{account.contactCount} contacts</span>}
-              </div>
-              {account.type !== "internal" && (
-                <Badge variant="secondary" className="capitalize">
-                  {account.type}
-                </Badge>
-              )}
-            </div>
-          </section>
-        )}
-
-        {/* Project Section (if linked) */}
-        {project && (
-          <section className="space-y-3">
-            <h3 className="flex items-center gap-2 font-semibold text-sm">
-              <FileText className="h-4 w-4" />
-              Project
-            </h3>
-            <div className="rounded-lg border p-3 space-y-2">
-              <div className="font-medium">{project.name}</div>
-              {project.address && (
-                <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                  <MapPin className="h-3 w-3" />
-                  {project.address}
-                </div>
-              )}
-              <div className="flex gap-4 text-xs text-muted-foreground">
-                <span>{project.emailCount} emails</span>
-                {project.firstSeen && (
-                  <span>
-                    Since {format(new Date(project.firstSeen), "MMM yyyy")}
-                  </span>
-                )}
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* Estimate Section */}
-        {matchingEstimate && (
-          <section className="space-y-3">
-            <h3 className="flex items-center gap-2 font-semibold text-sm">
-              <DollarSign className="h-4 w-4" />
-              Estimate
-            </h3>
-            <div className="rounded-lg border p-3 space-y-2">
-              <div className="font-medium">{matchingEstimate.name}</div>
-              {matchingEstimate.estimateNumber && (
-                <div className="text-sm text-muted-foreground">
-                  #{matchingEstimate.estimateNumber}
-                </div>
-              )}
-              <div className="flex flex-wrap gap-2">
-                {matchingEstimate.bidValue && (
-                  <Badge variant="outline">
-                    ${matchingEstimate.bidValue.toLocaleString()}
-                  </Badge>
-                )}
-                {matchingEstimate.bidStatus && (
-                  <Badge
-                    variant={
-                      matchingEstimate.awarded ? "default" : "secondary"
-                    }
-                  >
-                    {matchingEstimate.bidStatus}
-                  </Badge>
-                )}
-                {matchingEstimate.location && (
-                  <Badge variant="outline">
-                    <MapPin className="mr-1 h-3 w-3" />
-                    {matchingEstimate.location}
-                  </Badge>
-                )}
-              </div>
-              {matchingEstimate.dueDate && (
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Calendar className="h-3 w-3" />
-                  Due: {format(new Date(matchingEstimate.dueDate), "MMM d, yyyy")}
-                </div>
-              )}
-              {matchingEstimate.sharepointUrl && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-auto p-0 text-xs"
-                  asChild
-                >
-                  <a
-                    href={matchingEstimate.sharepointUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <ExternalLink className="mr-1 h-3 w-3" />
-                    Open in SharePoint
-                  </a>
-                </Button>
-              )}
-            </div>
-          </section>
-        )}
-
-        {/* Link Suggestions (if not linked) */}
+        {/* PRIORITY: Link Suggestions when unlinked */}
         {!project && linkSuggestions.length > 0 && (
           <section className="space-y-3">
             <h3 className="flex items-center gap-2 font-semibold text-sm">
@@ -232,7 +131,6 @@ export function ProjectContext({
             </h3>
             <div className="space-y-2">
               {linkSuggestions.map((suggestion) => {
-                // Get signal icon based on type
                 const SignalIcon =
                   suggestion.signalType === "conversation"
                     ? MessageSquare
@@ -254,8 +152,7 @@ export function ProjectContext({
                       <div className="flex items-center gap-2">
                         <SignalIcon className="h-4 w-4 text-muted-foreground" />
                         <span className="font-medium text-sm">
-                          {suggestion.project?.name ??
-                            `Project #${suggestion.projectId}`}
+                          {suggestion.project?.name ?? `Project #${suggestion.projectId}`}
                         </span>
                       </div>
                       <Badge
@@ -276,9 +173,8 @@ export function ProjectContext({
                     {onLinkProject && (
                       <Button
                         size="sm"
-                        variant={
-                          suggestion.confidence > 0.8 ? "default" : "secondary"
-                        }
+                        variant={suggestion.confidence > 0.8 ? "default" : "secondary"}
+                        className="w-full"
                         onClick={() => onLinkProject(suggestion.projectId)}
                       >
                         Link to this project
@@ -291,71 +187,216 @@ export function ProjectContext({
           </section>
         )}
 
-        {/* Account's Other Projects */}
-        {accountProjects.length > 1 && (
-          <section className="space-y-3">
-            <h3 className="font-semibold text-sm">
-              Other Projects ({accountProjects.length - 1})
-            </h3>
-            <div className="space-y-1">
-              {accountProjects
-                .filter((p) => p.id !== project?.id)
-                .slice(0, 5)
-                .map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center justify-between rounded px-2 py-1 text-sm hover:bg-muted"
-                  >
-                    <span>{p.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {p.emailCount} emails
-                    </span>
-                  </div>
-                ))}
-            </div>
-          </section>
+        {/* No suggestions and unlinked */}
+        {!project && linkSuggestions.length === 0 && !account && (
+          <div className="rounded-lg border border-dashed p-4 text-center text-muted-foreground">
+            <AlertCircle className="mx-auto mb-2 h-8 w-8 opacity-50" />
+            <p className="text-sm font-medium">No linked context</p>
+            <p className="text-xs mt-1">
+              This email hasn&apos;t been linked to any project or account yet.
+            </p>
+          </div>
         )}
 
-        <Separator />
+        {/* Context sections only when we have data */}
+        {hasContext && (
+          <>
+            <Separator />
 
-        {/* Email History for Project */}
-        {projectEmails.length > 0 && (
-          <section className="space-y-3">
-            <h3 className="flex items-center gap-2 font-semibold text-sm">
-              <Mail className="h-4 w-4" />
-              Email History ({projectEmails.length})
-            </h3>
-            <div className="space-y-1">
-              {projectEmails.slice(0, 10).map((e) => (
-                <button
-                  key={e.id}
-                  type="button"
-                  className={cn(
-                    "w-full text-left rounded px-2 py-1.5 text-sm hover:bg-muted",
-                    e.id === email.id && "bg-muted"
-                  )}
-                  onClick={() => onSelectEmail?.(e)}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="truncate font-medium">
-                      {e.subject ?? "(No subject)"}
-                    </span>
-                    <span className="ml-2 shrink-0 text-xs text-muted-foreground">
-                      {format(new Date(e.receivedAt), "MMM d")}
-                    </span>
+            {/* Decision Checks - only when we have context to check against */}
+            <section className="space-y-3">
+              <h3 className="font-semibold text-sm">Checks</h3>
+              <DecisionChecks email={email} estimate={matchingEstimate ?? null} />
+            </section>
+
+            {/* Account Section - only show when actually linked */}
+            {account && (
+              <>
+                <Separator />
+                <section className="space-y-3">
+                  <h3 className="flex items-center gap-2 font-semibold text-sm">
+                    <Building2 className="h-4 w-4" />
+                    Linked Account
+                  </h3>
+                  <div className="rounded-lg border p-3 space-y-2">
+                    <div className="font-medium">{account.name}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {account.domain}
+                    </div>
+                    <div className="flex gap-4 text-xs text-muted-foreground">
+                      <span>{account.emailCount} total emails</span>
+                      {account.contactCount > 0 && <span>{account.contactCount} contacts</span>}
+                    </div>
+                    {account.type !== "internal" && (
+                      <Badge variant="secondary" className="capitalize">
+                        {account.type}
+                      </Badge>
+                    )}
                   </div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    {e.fromName ?? e.fromEmail}
+                </section>
+              </>
+            )}
+
+            {/* Project Section */}
+            {project && (
+              <>
+                <Separator />
+                <section className="space-y-3">
+                  <h3 className="flex items-center gap-2 font-semibold text-sm">
+                    <FileText className="h-4 w-4" />
+                    Linked Project
+                  </h3>
+                  <div className="rounded-lg border p-3 space-y-2">
+                    <div className="font-medium">{project.name}</div>
+                    {project.address && (
+                      <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                        <MapPin className="h-3 w-3" />
+                        {project.address}
+                      </div>
+                    )}
+                    <div className="flex gap-4 text-xs text-muted-foreground">
+                      <span>{project.emailCount} emails</span>
+                      {project.firstSeen && (
+                        <span>Since {format(new Date(project.firstSeen), "MMM yyyy")}</span>
+                      )}
+                    </div>
                   </div>
-                </button>
-              ))}
-              {projectEmails.length > 10 && (
-                <div className="text-center text-xs text-muted-foreground py-2">
-                  + {projectEmails.length - 10} more
-                </div>
-              )}
-            </div>
-          </section>
+                </section>
+              </>
+            )}
+
+            {/* Estimate Section */}
+            {matchingEstimate && (
+              <>
+                <Separator />
+                <section className="space-y-3">
+                  <h3 className="flex items-center gap-2 font-semibold text-sm">
+                    <DollarSign className="h-4 w-4" />
+                    Estimate
+                  </h3>
+                  <div className="rounded-lg border p-3 space-y-2">
+                    <div className="font-medium">{matchingEstimate.name}</div>
+                    {matchingEstimate.estimateNumber && (
+                      <div className="text-sm text-muted-foreground">
+                        #{matchingEstimate.estimateNumber}
+                      </div>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {matchingEstimate.bidValue && (
+                        <Badge variant="outline">
+                          ${matchingEstimate.bidValue.toLocaleString()}
+                        </Badge>
+                      )}
+                      {matchingEstimate.bidStatus && (
+                        <Badge variant={matchingEstimate.awarded ? "default" : "secondary"}>
+                          {matchingEstimate.bidStatus}
+                        </Badge>
+                      )}
+                      {matchingEstimate.location && (
+                        <Badge variant="outline">
+                          <MapPin className="mr-1 h-3 w-3" />
+                          {matchingEstimate.location}
+                        </Badge>
+                      )}
+                    </div>
+                    {matchingEstimate.dueDate && (
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Calendar className="h-3 w-3" />
+                        Due: {format(new Date(matchingEstimate.dueDate), "MMM d, yyyy")}
+                      </div>
+                    )}
+                    {matchingEstimate.sharepointUrl && (
+                      <Button variant="ghost" size="sm" className="h-auto p-0 text-xs" asChild>
+                        <a
+                          href={matchingEstimate.sharepointUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <ExternalLink className="mr-1 h-3 w-3" />
+                          Open in SharePoint
+                        </a>
+                      </Button>
+                    )}
+                  </div>
+                </section>
+              </>
+            )}
+
+            {/* Account's Other Projects */}
+            {accountProjects.length > 0 && (
+              <>
+                <Separator />
+                <section className="space-y-3">
+                  <h3 className="font-semibold text-sm">
+                    Related Projects ({accountProjects.length})
+                  </h3>
+                  <div className="space-y-1">
+                    {accountProjects
+                      .filter((p) => p.id !== project?.id)
+                      .slice(0, 5)
+                      .map((p) => (
+                        <div
+                          key={p.id}
+                          className="flex items-center justify-between rounded px-2 py-1 text-sm hover:bg-muted cursor-pointer"
+                          onClick={() => onLinkProject?.(p.id)}
+                          onKeyDown={(e) => e.key === "Enter" && onLinkProject?.(p.id)}
+                          role="button"
+                          tabIndex={0}
+                        >
+                          <span className="truncate">{p.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {p.emailCount} emails
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                </section>
+              </>
+            )}
+
+            {/* Email History for Project */}
+            {projectEmails.length > 0 && (
+              <>
+                <Separator />
+                <section className="space-y-3">
+                  <h3 className="flex items-center gap-2 font-semibold text-sm">
+                    <Mail className="h-4 w-4" />
+                    Email History ({projectEmails.length})
+                  </h3>
+                  <div className="space-y-1">
+                    {projectEmails.slice(0, 10).map((e) => (
+                      <button
+                        key={e.id}
+                        type="button"
+                        className={cn(
+                          "w-full text-left rounded px-2 py-1.5 text-sm hover:bg-muted",
+                          e.id === email.id && "bg-muted"
+                        )}
+                        onClick={() => onSelectEmail?.(e)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="truncate font-medium">
+                            {e.subject ?? "(No subject)"}
+                          </span>
+                          <span className="ml-2 shrink-0 text-xs text-muted-foreground">
+                            {format(new Date(e.receivedAt), "MMM d")}
+                          </span>
+                        </div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {e.fromName ?? e.fromEmail}
+                        </div>
+                      </button>
+                    ))}
+                    {projectEmails.length > 10 && (
+                      <div className="text-center text-xs text-muted-foreground py-2">
+                        + {projectEmails.length - 10} more
+                      </div>
+                    )}
+                  </div>
+                </section>
+              </>
+            )}
+          </>
         )}
       </div>
     </ScrollArea>
