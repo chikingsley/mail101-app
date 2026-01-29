@@ -173,40 +173,42 @@ export function Mail({
         </ResizablePanel>
         <ResizableHandle withHandle />
         <ResizablePanel defaultSize={defaultLayout[1]} minSize={30}>
-          <Tabs defaultValue="all">
-            <div className={cn("flex items-center px-4", HEADER_HEIGHT)}>
-              <h1 className="font-bold text-xl">Inbox</h1>
-              <TabsList className="ml-auto">
-                <TabsTrigger
-                  className="text-zinc-600 dark:text-zinc-200"
-                  value="all"
-                >
-                  All mail
-                </TabsTrigger>
-                <TabsTrigger
-                  className="text-zinc-600 dark:text-zinc-200"
-                  value="unread"
-                >
-                  Unread
-                </TabsTrigger>
-              </TabsList>
-            </div>
-            <Separator />
-            <div className="bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-              <form>
-                <div className="relative">
-                  <Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
-                  <Input className="pl-8" placeholder="Search" />
-                </div>
-              </form>
-            </div>
-            <TabsContent className="m-0" value="all">
-              <MailList items={mails} />
-            </TabsContent>
-            <TabsContent className="m-0" value="unread">
-              <MailList items={mails.filter((item) => !item.read)} />
-            </TabsContent>
-          </Tabs>
+          <div className="flex h-full flex-col">
+            <Tabs defaultValue="all" className="flex h-full flex-col gap-0">
+              <div className={cn("flex items-center px-4", HEADER_HEIGHT)}>
+                <h1 className="font-bold text-xl">Inbox</h1>
+                <TabsList className="ml-auto">
+                  <TabsTrigger
+                    className="text-zinc-600 dark:text-zinc-200"
+                    value="all"
+                  >
+                    All mail
+                  </TabsTrigger>
+                  <TabsTrigger
+                    className="text-zinc-600 dark:text-zinc-200"
+                    value="unread"
+                  >
+                    Unread
+                  </TabsTrigger>
+                </TabsList>
+              </div>
+              <Separator />
+              <div className="bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+                <form>
+                  <div className="relative">
+                    <Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
+                    <Input className="pl-8" placeholder="Search" />
+                  </div>
+                </form>
+              </div>
+              <TabsContent className="m-0 flex-1 overflow-auto" value="all">
+                <MailList items={mails} />
+              </TabsContent>
+              <TabsContent className="m-0 flex-1 overflow-auto" value="unread">
+                <MailList items={mails.filter((item) => !item.read)} />
+              </TabsContent>
+            </Tabs>
+          </div>
         </ResizablePanel>
         <ResizableHandle withHandle />
         <ResizablePanel defaultSize={defaultLayout[2]} minSize={30}>
