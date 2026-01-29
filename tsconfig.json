@@ -23,7 +23,8 @@
 
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@census/*": ["../desert-services-hub/services/contract/census/*"]
     },
 
     // Some stricter flags (disabled by default)

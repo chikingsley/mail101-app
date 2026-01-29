@@ -79,26 +79,24 @@ export function ProjectContext({
   return (
     <ScrollArea className="h-full">
       <div className="p-4 space-y-6">
-        {/* Breadcrumb / Current Selection */}
-        <div className="space-y-1">
+        {/* Email Subject Header */}
+        <div className="space-y-2">
+          <h2 className="font-semibold text-base leading-tight">
+            {email.subject ?? "(No subject)"}
+          </h2>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            {account && (
-              <>
-                <span>{account.name}</span>
-                {project && (
-                  <>
-                    <span>/</span>
-                    <span className="font-medium text-foreground">
-                      {project.name}
-                    </span>
-                  </>
-                )}
-              </>
-            )}
-            {!account && !project && (
-              <span className="italic">No linked context</span>
-            )}
+            <span>From: {email.fromName ?? email.fromEmail}</span>
           </div>
+          {project && (
+            <Badge variant="default" className="mt-1">
+              Linked: {project.name}
+            </Badge>
+          )}
+          {email.classification && (
+            <Badge variant="outline" className="ml-2 uppercase">
+              {email.classification}
+            </Badge>
+          )}
         </div>
 
         <Separator />
@@ -111,25 +109,26 @@ export function ProjectContext({
 
         <Separator />
 
-        {/* Account Section */}
-        {account && (
+        {/* Sender Company Section - only show if meaningful (>1 email from them) */}
+        {account && account.emailCount > 1 && (
           <section className="space-y-3">
             <h3 className="flex items-center gap-2 font-semibold text-sm">
               <Building2 className="h-4 w-4" />
-              Account
+              Sender: {account.name}
             </h3>
             <div className="rounded-lg border p-3 space-y-2">
-              <div className="font-medium">{account.name}</div>
               <div className="text-sm text-muted-foreground">
                 {account.domain}
               </div>
               <div className="flex gap-4 text-xs text-muted-foreground">
-                <span>{account.emailCount} emails</span>
-                <span>{account.contactCount} contacts</span>
+                <span>{account.emailCount} total emails</span>
+                {account.contactCount > 0 && <span>{account.contactCount} contacts</span>}
               </div>
-              <Badge variant="secondary" className="capitalize">
-                {account.type}
-              </Badge>
+              {account.type !== "internal" && (
+                <Badge variant="secondary" className="capitalize">
+                  {account.type}
+                </Badge>
+              )}
             </div>
           </section>
         )}

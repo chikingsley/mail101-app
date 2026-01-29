@@ -2,11 +2,12 @@ import { serve } from "bun";
 import homepage from "./index.html";
 
 // Lazy load the database to avoid conflicts with the HTML bundler
-let db: typeof import("../census/db") | null = null;
+// Using the census from desert-services-hub (the actively maintained one)
+let db: typeof import("@census/db/index") | null = null;
 
 async function getDb() {
   if (!db) {
-    db = await import("../census/db");
+    db = await import("@census/db/index");
   }
   return db;
 }
@@ -152,7 +153,7 @@ const server = serve({
         const id = Number.parseInt(req.params.id, 10);
         const body = (await req.json()) as { classification?: string };
         const classification =
-          body.classification as import("../census/db").EmailClassification;
+          body.classification as import("@census/db/index").EmailClassification;
 
         if (!classification) {
           return json({ error: "classification is required" }, 400);
