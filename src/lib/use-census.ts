@@ -62,16 +62,44 @@ function useFetch<T>(url: string | null): FetchState<T> & { refetch: () => void 
 }
 
 // ============================================
+// Mailboxes
+// ============================================
+
+interface MailboxesResponse {
+  mailboxes: Array<{
+    id: number;
+    email: string;
+    displayName: string | null;
+    lastSyncAt: string | null;
+    emailCount: number;
+  }>;
+  actionable: string[];
+}
+
+export function useMailboxes() {
+  return useFetch<MailboxesResponse>("/api/mailboxes");
+}
+
+// ============================================
 // Emails
 // ============================================
 
 interface EmailsResponse {
   emails: CensusEmail[];
   total: number;
+  mailbox?: {
+    id: number;
+    email: string;
+    emailCount: number;
+  };
 }
 
-export function useEmails(limit = 50) {
-  return useFetch<EmailsResponse>(`/api/emails?limit=${limit}`);
+export function useEmails(limit = 50, mailbox?: string) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (mailbox) {
+    params.set("mailbox", mailbox);
+  }
+  return useFetch<EmailsResponse>(`/api/emails?${params.toString()}`);
 }
 
 interface EmailDetailResponse {

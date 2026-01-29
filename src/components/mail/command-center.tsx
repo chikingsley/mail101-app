@@ -17,6 +17,7 @@ import {
   Filter,
   FolderOpen,
   Inbox,
+  Mail,
   Search,
   TrendingUp,
 } from "lucide-react";
@@ -39,6 +40,7 @@ import {
   useEmails,
   useEstimates,
   useLinkEmail,
+  useMailboxes,
   useProjects,
   useStats,
 } from "@/lib/use-census";
@@ -67,8 +69,12 @@ interface NavLink {
 type FilterType = "all" | "needs-triage" | "by-account" | "by-project";
 
 export function CommandCenter() {
+  // Mailbox state - default to chi@ (your primary inbox)
+  const [selectedMailbox, setSelectedMailbox] = useState<string>("chi@desertservices.net");
+  
   // Data hooks
-  const { data: emailsData, loading: emailsLoading, refetch: refetchEmails } = useEmails(100);
+  const { data: mailboxesData } = useMailboxes();
+  const { data: emailsData, loading: emailsLoading, refetch: refetchEmails } = useEmails(100, selectedMailbox);
   const { data: statsData } = useStats();
   const { data: _accountsData } = useAccounts();
   const { data: _projectsData } = useProjects();
@@ -81,6 +87,10 @@ export function CommandCenter() {
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeWorkflow, setActiveWorkflow] = useState<WorkflowType | null>(null);
+  
+  // Get actionable mailboxes
+  const actionableMailboxes = mailboxesData?.actionable ?? [];
+  const allMailboxes = mailboxesData?.mailboxes ?? [];
 
   // Context for selected email
   const {
@@ -161,12 +171,12 @@ export function CommandCenter() {
     setActiveWorkflow(type);
   }, []);
 
-  // Nav links
+  // Nav links - counts are for current mailbox
   const navLinks: NavLink[] = [
     {
-      title: "All Emails",
+      title: "All",
       icon: Inbox,
-      count: statsData?.totalEmails,
+      count: emailsData?.total,
       active: activeFilter === "all",
       onClick: () => setActiveFilter("all"),
     },
@@ -178,18 +188,18 @@ export function CommandCenter() {
       onClick: () => setActiveFilter("needs-triage"),
     },
     {
-      title: "By Account",
-      icon: Building2,
-      count: statsData?.totalAccounts,
-      active: activeFilter === "by-account",
-      onClick: () => setActiveFilter("by-account"),
-    },
-    {
-      title: "By Project",
+      title: "Linked",
       icon: FolderOpen,
-      count: statsData?.totalProjects,
+      count: emails.filter((e) => e.projectId !== null).length,
       active: activeFilter === "by-project",
       onClick: () => setActiveFilter("by-project"),
+    },
+    {
+      title: "Has Account",
+      icon: Building2,
+      count: emails.filter((e) => e.accountId !== null).length,
+      active: activeFilter === "by-account",
+      onClick: () => setActiveFilter("by-account"),
     },
   ];
 
@@ -212,7 +222,48 @@ export function CommandCenter() {
           <Separator />
 
           <ScrollArea className="flex-1">
+            {/* Mailbox Selector */}
             <div className="p-2 space-y-1">
+              <h3 className="px-3 py-1 text-xs font-semibold uppercase text-muted-foreground">
+                Mailboxes
+              </h3>
+              {actionableMailboxes.map((email) => {
+                const mailbox = allMailboxes.find((m) => m.email === email);
+                const shortName = email.split("@")[0];
+                return (
+                  <button
+                    key={email}
+                    type="button"
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors",
+                      selectedMailbox === email
+                        ? "bg-primary text-primary-foreground font-medium"
+                        : "hover:bg-muted/50 text-muted-foreground"
+                    )}
+                    onClick={() => {
+                      setSelectedMailbox(email);
+                      setSelectedEmail(null);
+                    }}
+                  >
+                    <Mail className="h-4 w-4" />
+                    <span className="flex-1 capitalize">{shortName}</span>
+                    {mailbox && (
+                      <span className="text-xs tabular-nums opacity-70">
+                        {mailbox.emailCount.toLocaleString()}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <Separator className="my-2" />
+
+            {/* Filters */}
+            <div className="p-2 space-y-1">
+              <h3 className="px-3 py-1 text-xs font-semibold uppercase text-muted-foreground">
+                Filters
+              </h3>
               {navLinks.map((link) => (
                 <button
                   key={link.title}
@@ -343,7 +394,12 @@ export function CommandCenter() {
         <ResizablePanel defaultSize={50} minSize={30}>
           <div className="flex h-full flex-col">
             <div className={cn("flex items-center gap-4 px-4", HEADER_HEIGHT)}>
-              <h2 className="font-semibold">Inbox</h2>
+              <h2 className="font-semibold">
+                {selectedMailbox.split("@")[0]}@
+                <span className="text-xs text-muted-foreground ml-1">
+                  ({emailsData?.total?.toLocaleString() ?? 0} emails)
+                </span>
+              </h2>
               <div className="ml-auto flex items-center gap-2">
                 <div className="relative">
                   <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

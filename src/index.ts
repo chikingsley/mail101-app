@@ -25,17 +25,86 @@ function getQueryParams(req: Request) {
   const limit = Number.parseInt(url.searchParams.get("limit") ?? "50", 10);
   const offset = Number.parseInt(url.searchParams.get("offset") ?? "0", 10);
   const query = url.searchParams.get("q") ?? "";
-  return { limit, offset, query };
+  const mailbox = url.searchParams.get("mailbox") ?? "";
+  return { limit, offset, query, mailbox };
 }
+
+// Your actionable mailboxes (can write/triage these)
+const ACTIONABLE_MAILBOXES = [
+  "chi@desertservices.net",
+  "contracts@desertservices.net",
+  "dustpermits@desertservices.net",
+];
 
 const server = serve({
   routes: {
     // ============================================
+    // API: Mailboxes
+    // ============================================
+    "/api/mailboxes": async () => {
+      const census = await getDb();
+      const mailboxes = census.getAllMailboxes();
+      return json({
+        mailboxes,
+        actionable: ACTIONABLE_MAILBOXES,
+      });
+    },
+
+    // ============================================
     // API: Emails
     // ============================================
     "/api/emails": async (req) => {
-      const { limit } = getQueryParams(req);
+      const { limit, mailbox } = getQueryParams(req);
       const census = await getDb();
+      
+      // If mailbox specified, filter by it
+      if (mailbox) {
+        const mb = census.getMailbox(mailbox);
+        if (mb) {
+          const emails = census.db
+            .query(
+              `SELECT * FROM emails WHERE mailbox_id = ? ORDER BY received_at DESC LIMIT ?`
+            )
+            .all(mb.id, limit);
+          // Parse emails
+          const parsedEmails = emails.map((row: Record<string, unknown>) => ({
+            id: row.id as number,
+            messageId: row.message_id as string,
+            mailboxId: row.mailbox_id as number,
+            conversationId: row.conversation_id as string | null,
+            subject: row.subject as string | null,
+            fromEmail: row.from_email as string | null,
+            fromName: row.from_name as string | null,
+            toEmails: JSON.parse((row.to_emails as string) || "[]"),
+            ccEmails: JSON.parse((row.cc_emails as string) || "[]"),
+            receivedAt: row.received_at as string,
+            hasAttachments: row.has_attachments === 1,
+            attachmentNames: JSON.parse((row.attachment_names as string) || "[]"),
+            bodyPreview: row.body_preview as string | null,
+            webUrl: row.web_url as string | null,
+            classification: row.classification as string | null,
+            classificationConfidence: row.classification_confidence as number | null,
+            classificationMethod: row.classification_method as string | null,
+            projectName: row.project_name as string | null,
+            contractorName: row.contractor_name as string | null,
+            mondayEstimateId: row.monday_estimate_id as string | null,
+            notionProjectId: row.notion_project_id as string | null,
+            accountId: row.account_id as number | null,
+            projectId: row.project_id as number | null,
+            bodyFull: row.body_full as string | null,
+            bodyHtml: row.body_html as string | null,
+            categories: JSON.parse((row.categories as string) || "[]"),
+            createdAt: row.created_at as string,
+          }));
+          return json({ 
+            emails: parsedEmails, 
+            total: mb.emailCount,
+            mailbox: mb,
+          });
+        }
+      }
+      
+      // Default: get recent emails from actionable mailboxes only
       const emails = census.getRecentEmails(limit);
       return json({ emails, total: census.getTotalEmailCount() });
     },

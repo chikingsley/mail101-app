@@ -22,10 +22,8 @@ import type { CensusEmail, CensusEstimate } from "@/lib/census-types";
 import { cn } from "@/lib/utils";
 
 // VIP senders that should always surface
-const VIP_SENDERS = [
-  "jayson@desertservices.net",
-  "jeff@desertservices.net",
-];
+// Add emails here as you identify important contacts
+const VIP_SENDERS: string[] = [];
 
 // Urgent keywords in subject
 const URGENT_KEYWORDS = [
